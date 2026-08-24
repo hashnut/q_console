@@ -4,9 +4,11 @@ Windows 트레이/오버레이로 **Claude Code · Fable · Codex 계정의 주�
 
 A tiny Windows tray/overlay app that shows the **weekly account usage** of Claude Code, Fable, and Codex.
 
-```
-Claude 3% (4d 10h)   Fable 0% (4d 10h)  |  Codex 1% (6d 23h)
-```
+![대시보드 (phosphor 테마)](docs/dashboard-phosphor.png)
+
+오버레이는 화면 구석에 한 줄로 붙어 있습니다:
+
+![오버레이](docs/overlay.png)
 
 표시하는 것은 세 가지뿐입니다:
 
@@ -55,7 +57,7 @@ q_console은 두 자격 증명 파일을 **읽기만** 합니다. 토큰을 conf
 
 ## 화면
 
-대시보드에는 Claude Code / Fable / Codex 카드 세 개가 있고, 각 카드에 현재 주간 사용률 %, 리셋까지 남은 시간, 실측 배지가 표시됩니다. 오버레이는 한 줄로 세 사용률과 리셋 잔여 시간을 보여줍니다.
+대시보드에는 Claude Code / Fable / Codex 카드 세 개가 있고, 각 카드에 현재 주간 사용률 %, 리셋까지 남은 시간, 실측 배지가 표시됩니다. 오버레이는 한 줄로 세 사용률과 리셋 잔여 시간을 보여줍니다. (위 스크린샷 참고)
 
 테마: `Surfacer` / `HUD (phosphor)` / `Mini`.
 
