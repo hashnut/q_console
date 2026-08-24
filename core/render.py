@@ -628,8 +628,19 @@ def render_overlay(snap: dict) -> str:
                                          len("Codex") + len(claude_reset) +
                                          len(fable_reset) + len(codex_reset)) + 62)
     body = "<div class='div'></div>".join(segments)
-    stamp = "<span class='age'>%s</span>" % esc(snap.get("generated_stamp", "")[-5:])
+    # Live wall clock, not the refresh stamp: the strip is only re-rendered every
+    # poll (30 min), so a static stamp reads as a clock that has stopped. Ticks
+    # on the minute boundary so it never lags a real clock by more than a beat.
+    stamp = ("<span class='age' id='clk' title='마지막 갱신 %s'>%s</span>"
+             % (esc(snap.get("generated_stamp", "")),
+                esc(snap.get("generated_stamp", "")[-5:])))
+    clock = (
+        "(function(){var e=document.getElementById('clk');"
+        "function p(n){return (n<10?'0':'')+n;}"
+        "function t(){var d=new Date();e.textContent=p(d.getHours())+':'+p(d.getMinutes());"
+        "setTimeout(t,60000-(d.getSeconds()*1000+d.getMilliseconds())+50);}t();})();"
+    )
     width += 44
     return _shell("q_console overlay", OVERLAY_CSS,
-                  body + stamp + "<script>%s</script>" % OVERLAY_DRAG_SCRIPT,
+                  body + stamp + "<script>%s%s</script>" % (OVERLAY_DRAG_SCRIPT, clock),
                   max(320, min(700, width)), 32)
