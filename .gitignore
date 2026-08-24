@@ -4,7 +4,6 @@ __pycache__/
 build/
 dist/
 release/
-q_console.exe
 
 # vendored original usage-view distribution (not part of this project's source)
 usage-view/
