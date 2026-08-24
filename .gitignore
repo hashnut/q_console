@@ -1,0 +1,18 @@
+# build artifacts
+__pycache__/
+*.pyc
+build/
+dist/
+release/
+q_console.exe
+
+# vendored original usage-view distribution (not part of this project's source)
+usage-view/
+
+# local docs superseded by README.md
+READ-ME-FIRST.txt
+
+# local app data / editor
+*.tmp
+.vscode/
+.idea/
