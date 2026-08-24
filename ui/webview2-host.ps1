@@ -100,6 +100,32 @@ public static void Push(string value) { events.Enqueue(value); }
 public static string Pop() { string value; return events.TryDequeue(out value) ? value : null; }
 '@ -ErrorAction SilentlyContinue
 
+# Alt-Tab lists every unowned top-level window regardless of ShowInTaskbar.
+# The only thing that removes a window from that list is WS_EX_TOOLWINDOW
+# (and NOT WS_EX_APPWINDOW), so the overlay strip sets it on its own handle.
+Add-Type -Namespace UV -Name WinStyle -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+public static extern int GetWindowLong(System.IntPtr hwnd, int index);
+[System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+public static extern int SetWindowLong(System.IntPtr hwnd, int index, int value);
+'@ -ErrorAction SilentlyContinue
+
+function Set-AltTabHidden {
+    # $Hidden=$true: tool window (no Alt-Tab, no taskbar). $false: normal app
+    # window. Re-applied on HandleCreated because WinForms recreates the HWND
+    # (and so drops raw ex-styles) whenever ShowInTaskbar flips.
+    param($Form, [bool]$Hidden)
+    if (-not $Form -or $Form.IsDisposed) { return }
+    try {
+        $GWL_EXSTYLE = -20; $WS_EX_TOOLWINDOW = 0x80; $WS_EX_APPWINDOW = 0x40000
+        $h = $Form.Handle
+        $ex = [UV.WinStyle]::GetWindowLong($h, $GWL_EXSTYLE)
+        if ($Hidden) { $ex = ($ex -bor $WS_EX_TOOLWINDOW) -band (-bnot $WS_EX_APPWINDOW) }
+        else         { $ex = ($ex -band (-bnot $WS_EX_TOOLWINDOW)) -bor $WS_EX_APPWINDOW }
+        [void][UV.WinStyle]::SetWindowLong($h, $GWL_EXSTYLE, $ex)
+    } catch { }
+}
+
 function Set-WindowChrome {
     param($Form)
     if (-not $Form) { return }
@@ -192,6 +218,10 @@ function Initialize-DetailHost {
         # Closing must HIDE, not dispose: disposing would throw away the warmed
         # browser process and make the next open pay init again. Clearing WV2Open
         # here is what makes the next refresh stop re-rendering an unseen window.
+        $form.add_HandleCreated({
+            param($src, $e)
+            if ($script:WV2Overlay) { Set-AltTabHidden $src $true }
+        })
         $form.add_FormClosing({
             param($src, $e)
             if ($e.CloseReason -eq [System.Windows.Forms.CloseReason]::UserClosing) {
@@ -498,6 +528,7 @@ function Set-OverlayMode {
         $f.Opacity = 0.90
         $f.ShowInTaskbar = $false
         Set-OverlayGeometry
+        Set-AltTabHidden $f $true
         if (-not $f.Visible) { $f.Show() }
         $script:WV2Open = $true
         Invoke-DetailNavigate (Get-ActiveDetailPath)   # swap to overlay.html
@@ -507,6 +538,7 @@ function Set-OverlayMode {
         $f.Opacity = 1.0
         $f.TopMost = [bool]$script:WV2AlwaysOnTop
         $f.ShowInTaskbar = $true
+        Set-AltTabHidden $f $false
         if ($script:WV2SavedBounds) {
             $f.Bounds = $script:WV2SavedBounds
             $script:WV2SavedBounds = $null
@@ -533,6 +565,7 @@ function Show-DetailHostWindow {
         # taskbar. A "show" gesture just makes sure it is on screen.
         if ($f.Location.X -lt -10000) { Set-OverlayGeometry }
         if (-not $f.Visible) { $f.Show() }
+        Set-AltTabHidden $f $true
         $f.TopMost = $true
         $script:WV2Open = $true
         if ($script:WV2Dirty) {
