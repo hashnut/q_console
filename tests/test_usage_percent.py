@@ -110,6 +110,9 @@ class UsagePresentationTests(unittest.TestCase):
         self.assertIn("(7d 0h)", html)
         self.assertIn("aria-label='ChatGPT'", html)
         self.assertIn("M304.246 294.611", html)
+        self.assertIn("postMessage('q_console:drag-start')", html)
+        self.assertIn("postMessage('q_console:drag-move')", html)
+        self.assertIn("cursor:move", html)
         self.assertNotIn("$", html)
         self.assertNotIn("5h", html)
 

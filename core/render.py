@@ -572,7 +572,7 @@ ICON_CODEX = (
 
 OVERLAY_CSS = """
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:#0c0f13}
+body{background:#0c0f13;cursor:move;user-select:none;-webkit-user-select:none;touch-action:none}
 #stage{display:flex;align-items:center;gap:10px;padding:0 12px;
  background:#0c0f13;border-top:1px solid #232a33;color:#e6e9ee;
  font-family:'Pretendard','Segoe UI','Malgun Gothic',sans-serif;font-size:12.5px;
@@ -585,6 +585,19 @@ body{background:#0c0f13}
 .div{width:1px;height:14px;background:#232a33}
 .age{margin-left:auto;font-size:9.5px;color:#4e5761;font-variant-numeric:tabular-nums}
 """
+
+OVERLAY_DRAG_SCRIPT = (
+    "(function(){var active=false,w=window.chrome&&window.chrome.webview;"
+    "if(!w)return;document.addEventListener('dragstart',function(e){e.preventDefault();});"
+    "document.addEventListener('pointerdown',function(e){if(e.button!==0)return;"
+    "active=true;e.preventDefault();try{document.body.setPointerCapture(e.pointerId);}catch(_){}"
+    "w.postMessage('q_console:drag-start');});"
+    "document.addEventListener('pointermove',function(e){if(active){e.preventDefault();"
+    "w.postMessage('q_console:drag-move');}});"
+    "function end(e){if(!active)return;active=false;e.preventDefault();"
+    "w.postMessage('q_console:drag-end');}"
+    "document.addEventListener('pointerup',end);document.addEventListener('pointercancel',end);})();"
+)
 
 
 def render_overlay(snap: dict) -> str:
@@ -617,5 +630,6 @@ def render_overlay(snap: dict) -> str:
     body = "<div class='div'></div>".join(segments)
     stamp = "<span class='age'>%s</span>" % esc(snap.get("generated_stamp", "")[-5:])
     width += 44
-    return _shell("q_console overlay", OVERLAY_CSS, body + stamp,
+    return _shell("q_console overlay", OVERLAY_CSS,
+                  body + stamp + "<script>%s</script>" % OVERLAY_DRAG_SCRIPT,
                   max(320, min(700, width)), 32)

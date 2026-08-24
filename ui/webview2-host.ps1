@@ -90,6 +90,16 @@ Add-Type -Namespace UV -Name Chrome -MemberDefinition @'
 public static extern int DwmSetWindowAttribute(System.IntPtr hwnd, int attr, ref int val, int size);
 '@ -ErrorAction SilentlyContinue
 
+# WebMessageReceived can arrive outside the WinForms UI runspace. Queue the
+# pointer events in a tiny CLR bridge; a UI-thread timer drains them and is the
+# only code that ever touches Form.Location.
+Add-Type -Namespace UV -Name DragBridge -MemberDefinition @'
+private static readonly System.Collections.Concurrent.ConcurrentQueue<string> events =
+    new System.Collections.Concurrent.ConcurrentQueue<string>();
+public static void Push(string value) { events.Enqueue(value); }
+public static string Pop() { string value; return events.TryDequeue(out value) ? value : null; }
+'@ -ErrorAction SilentlyContinue
+
 function Set-WindowChrome {
     param($Form)
     if (-not $Form) { return }
@@ -216,66 +226,53 @@ function Initialize-DetailHost {
         $wv.DefaultBackgroundColor = [System.Drawing.Color]::Black
         $form.Controls.Add($wv)
 
-        # Overlay drag strip. The WebView2 surface eats every mouse event, so a
-        # borderless overlay would be immovable; this 14 px WinForms bar above
-        # it is plain-old form real estate and can drive a manual move. Hidden
-        # (Height 0 via Visible=false) outside overlay mode.
-        $grip = New-Object System.Windows.Forms.Panel
-        $grip.Dock = 'Top'
-        $grip.Height = 14
-        $grip.BackColor = [System.Drawing.Color]::FromArgb(34, 41, 51)
-        $grip.Cursor = [System.Windows.Forms.Cursors]::SizeAll
-        $grip.Visible = $false
-        $gripLabel = New-Object System.Windows.Forms.Label
-        $gripLabel.Text = '· · ·'
-        $gripLabel.ForeColor = [System.Drawing.Color]::FromArgb(139, 149, 161)
-        $gripLabel.Font = New-Object System.Drawing.Font 'Segoe UI', 7
-        $gripLabel.Dock = 'Fill'
-        $gripLabel.TextAlign = 'MiddleCenter'
-        $grip.Controls.Add($gripLabel)
-        $form.Controls.Add($grip)
-        # Dock layout runs in reverse z-order: the frontmost control docks last
-        # and receives the leftover space. The FILL control (the browser) must
-        # therefore be in front, so push the grip to the back - otherwise the
-        # browser paints under the grip and the top 14 px of the page is hidden.
-        $grip.SendToBack()
-        $script:WV2Grip = $grip
         $script:WV2DragFrom = $null
-        $dragDown = {
-            param($src, $e)
-            if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
-                $script:WV2DragFrom = @([System.Windows.Forms.Cursor]::Position,
-                                        $script:WV2Form.Location)
+        $script:WV2DragTimer = New-Object System.Windows.Forms.Timer
+        $script:WV2DragTimer.Interval = 16
+        $script:WV2DragTimer.add_Tick({
+            try {
+                while ($true) {
+                    $message = [UV.DragBridge]::Pop()
+                    if ($null -eq $message) { break }
+                    if ($message -eq 'q_console:drag-start') {
+                        $script:WV2DragFrom = @(
+                            [System.Windows.Forms.Cursor]::Position,
+                            $script:WV2Form.Location)
+                        continue
+                    }
+                    if ($message -eq 'q_console:drag-end') {
+                        $script:WV2DragFrom = $null
+                        continue
+                    }
+                    if ($message -ne 'q_console:drag-move' -or -not $script:WV2DragFrom) { continue }
+                    $anchor = $script:WV2DragFrom
+                    $cur = [System.Windows.Forms.Cursor]::Position
+                    $nx = $anchor[1].X + $cur.X - $anchor[0].X
+                    $ny = $anchor[1].Y + $cur.Y - $anchor[0].Y
+                    # The taskbar is itself a shell-owned topmost window and can
+                    # legitimately cover us if the user drags into its rectangle.
+                    # Clamp to the current monitor's WorkingArea instead: this lets
+                    # the strip sit right above taskbars on any screen or edge while
+                    # never getting trapped behind one.
+                    $work = [System.Windows.Forms.Screen]::FromPoint($cur).WorkingArea
+                    $pad = 4
+                    $maxX = [Math]::Max($work.Left + $pad,
+                                        $work.Right - $script:WV2Form.Width - $pad)
+                    $maxY = [Math]::Max($work.Top + $pad,
+                                        $work.Bottom - $script:WV2Form.Height - $pad)
+                    $nx = [Math]::Min([Math]::Max($nx, $work.Left + $pad), $maxX)
+                    $ny = [Math]::Min([Math]::Max($ny, $work.Top + $pad), $maxY)
+                    $script:WV2Form.Location = New-Object System.Drawing.Point $nx, $ny
+                }
+            } catch {
+                $script:WV2DragFrom = $null
+                try {
+                    ("overlay drag failed: " + $_.Exception.ToString()) |
+                        Out-File -Append -Encoding utf8 (Join-Path $AppHome 'tray-error.log')
+                } catch { }
             }
-        }
-        $dragMove = {
-            param($src, $e)
-            $anchor = $script:WV2DragFrom
-            if ($anchor) {
-                $cur = [System.Windows.Forms.Cursor]::Position
-                $nx = $anchor[1].X + $cur.X - $anchor[0].X
-                $ny = $anchor[1].Y + $cur.Y - $anchor[0].Y
-                $script:WV2Form.Location = New-Object System.Drawing.Point $nx, $ny
-            }
-        }
-        $dragUp = { param($src, $e) $script:WV2DragFrom = $null }
-        foreach ($ctl in @($grip, $gripLabel)) {
-            $ctl.add_MouseDown($dragDown)
-            $ctl.add_MouseMove($dragMove)
-            $ctl.add_MouseUp($dragUp)
-        }
-        # Double-click the strip = leave overlay mode; discoverable escape hatch
-        # right on the surface (the tray menu stays the canonical toggle). The
-        # worker persists the flag so the next launch agrees.
-        $exitOverlay = {
-            param($src, $e)
-            Set-OverlayMode $false
-            if (Get-Command Save-OverlayFlag -ErrorAction SilentlyContinue) {
-                Save-OverlayFlag $false
-            }
-        }
-        $grip.add_DoubleClick($exitOverlay)
-        $gripLabel.add_DoubleClick($exitOverlay)
+        })
+        $script:WV2DragTimer.Start()
 
         $udf = Join-Path $AppHome 'webview2'
         New-Item -ItemType Directory -Force -Path $udf | Out-Null
@@ -294,6 +291,14 @@ function Initialize-DetailHost {
                 $s.IsStatusBarEnabled = $false
                 $s.IsZoomControlEnabled = $false
                 $s.AreBrowserAcceleratorKeysEnabled = $false
+                $src.CoreWebView2.add_WebMessageReceived({
+                    param($sender, $eventArgs)
+                    if (-not $script:WV2Overlay -or -not $script:WV2Form) { return }
+                    try { $message = $eventArgs.TryGetWebMessageAsString() } catch { return }
+                    if ($message -like 'q_console:drag-*') {
+                        [UV.DragBridge]::Push($message)
+                    }
+                })
             } else {
                 $script:WV2Failure = 'CoreWebView2 초기화 실패'
             }
@@ -443,9 +448,8 @@ function Resize-DetailToDocument {
 # A tiny always-on-top status strip: per-provider icon + used% + reset, one
 # line, borderless, translucent. It shows its OWN document (overlay.html,
 # written by the worker on every refresh alongside detail.html) - not a scaled
-# copy of the board. The 14 px grip bar above the browser surface is the only
-# WinForms-owned pixel row, and it is how the strip is dragged (WebView2
-# swallows all mouse input) and how overlay mode is left (double-click).
+# copy of the board. The document posts a drag message on left-button down, so
+# every visible black pixel is movable without a separate WinForms grip row.
 
 function Get-OverlayDocSize {
     # data-w/data-h of overlay.html, same contract as the board document.
@@ -459,15 +463,13 @@ function Get-OverlayDocSize {
 }
 
 function Set-OverlayGeometry {
-    # Pin to the bottom-right of the working area at the document's native size
-    # (plus the grip). If the user drags it elsewhere we keep that position on
+    # Pin to the bottom-right of the working area at the document's native size.
+    # If the user drags it elsewhere we keep that position on
     # later refreshes - only a size change re-pins.
     $f = $script:WV2Form
     if (-not $f -or $f.IsDisposed) { return }
     $doc = Get-OverlayDocSize
-    $grip = 0
-    if ($script:WV2Grip) { $grip = 14 }
-    $newSize = New-Object System.Drawing.Size $doc[0], ($doc[1] + $grip)
+    $newSize = New-Object System.Drawing.Size $doc[0], $doc[1]
     $repin = ($f.ClientSize -ne $newSize) -or ($f.Location.X -lt -10000)
     $f.ClientSize = $newSize
     if ($repin) {
@@ -490,18 +492,16 @@ function Set-OverlayMode {
         }
         $script:WV2SavedBounds = $f.Bounds
         $f.FormBorderStyle = 'None'
-        # The board window's minimum would clamp the strip's 62 px height.
+        # The board window's minimum would clamp the compact strip height.
         $f.MinimumSize = New-Object System.Drawing.Size 0, 0
         $f.TopMost = $true
         $f.Opacity = 0.90
         $f.ShowInTaskbar = $false
-        if ($script:WV2Grip) { $script:WV2Grip.Visible = $true }
         Set-OverlayGeometry
         if (-not $f.Visible) { $f.Show() }
         $script:WV2Open = $true
         Invoke-DetailNavigate (Get-ActiveDetailPath)   # swap to overlay.html
     } else {
-        if ($script:WV2Grip) { $script:WV2Grip.Visible = $false }
         $f.FormBorderStyle = 'Sizable'
         $f.MinimumSize = New-Object System.Drawing.Size 360, 180
         $f.Opacity = 1.0
