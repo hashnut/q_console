@@ -141,8 +141,12 @@ def heatmap(heat, accent, title):
 def limit_row(limit, hero=False):
     tone = limit.get("bar_tone") or "unknown"
     colour = TONE.get(tone, TONE["unknown"])
-    badge = ("<span class='badge measured'>실측</span>" if limit.get("measured")
-             else "<span class='badge budget'>예산 기준</span>")
+    if limit.get("stale"):
+        badge = "<span class='badge stale'>마지막 실측</span>"
+    elif limit.get("measured"):
+        badge = "<span class='badge measured'>실측</span>"
+    else:
+        badge = "<span class='badge budget'>예산 기준</span>"
     if hero:
         return (
             "<div class='hero'>"
@@ -268,6 +272,7 @@ body{background:#0a0c0f}
 .badge{font-size:9px;letter-spacing:.06em;padding:1px 5px;border-radius:4px;margin-left:5px;
  vertical-align:1px;font-weight:700}
 .badge.measured{background:rgba(61,220,132,.14);color:#3ddc84}
+.badge.stale{background:rgba(242,193,78,.16);color:#f2c14e}
 .badge.budget{background:rgba(255,255,255,.07);color:#8b95a1}
 .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:1px}
 .tile{background:#0d1116;border:1px solid #1b212a;border-radius:8px;padding:5px 9px}
@@ -336,6 +341,7 @@ body:after{content:'';position:fixed;inset:0;pointer-events:none;
 .lim-sub{font-size:10px;color:#2f7f63;margin-top:2px}
 .badge{font-size:9px;margin-left:5px;color:#2f7f63}
 .badge.measured{color:#7ef7c0}
+.badge.stale{color:#f2c14e}
 .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .tile{border:1px dashed #164536;padding:4px 8px}
 .tile-l{display:block;font-size:9px;color:#2f7f63}
@@ -377,7 +383,8 @@ body{background:#0a0c0f}
 .mbar{flex:1;height:9px;background:#1b212a;border-radius:999px;overflow:hidden}
 .mbar i{display:block;height:100%;border-radius:999px}
 .mbar .unk{background:repeating-linear-gradient(90deg,#252c36 0 5px,#1b212a 5px 10px)}
-.mval{width:46px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;flex:none}
+.mval{width:52px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;flex:none}
+.mst{color:#f2c14e;font-weight:700}
 .mrs{width:52px;text-align:right;color:#69737f;font-size:10px;flex:none;
  font-variant-numeric:tabular-nums}
 .mfoot{color:#5b646e;font-size:10px;border-top:1px solid #1b212a;padding-top:6px}
@@ -490,12 +497,16 @@ def _mini(snap):
             tag = "%s %s" % (code, MINI_KEY.get(limit.get("key"), limit.get("key") or ""))
             reset = ("롤링" if limit.get("reset_in") is None
                      else limit.get("reset_text"))
+            # The mini strip has no room for the "마지막 실측" badge the cards
+            # carry, so a carried value says so with the same * the summaries
+            # use rather than passing itself off as a fresh read.
+            mark = "<span class='mst'>*</span>" if limit.get("stale") else ""
             rows.append(
                 "<div class='mrow'><span class='mtag'>%s</span>"
                 "<div class='mbar'>%s</div>"
-                "<span class='mval' style='color:%s'>%s</span>"
+                "<span class='mval' style='color:%s'>%s%s</span>"
                 "<span class='mrs'>%s</span></div>"
-                % (esc(tag), fill, tone, pct_text(used), esc(reset)))
+                % (esc(tag), fill, tone, pct_text(used), mark, esc(reset)))
     banner = snap["gui_model"]["banner"]
     body = (
         "<div class='mtop'><b>q_console</b><span>%s · %s 전</span></div>%s"
@@ -581,6 +592,8 @@ body{background:#0c0f13;cursor:move;user-select:none;-webkit-user-select:none;to
 .oi{width:13px;height:13px;flex:none}
 .k{font-size:9.5px;color:#69737f;letter-spacing:.04em}
 .v{font-weight:700;font-variant-numeric:tabular-nums}
+.v.stale{opacity:.62}
+.st{font-size:10px;color:#f2c14e;margin-left:-3px;cursor:help}
 .r{font-size:10px;color:#7b8590;font-variant-numeric:tabular-nums}
 .div{width:1px;height:14px;background:#232a33}
 .age{margin-left:auto;font-size:9.5px;color:#4e5761;font-variant-numeric:tabular-nums}
@@ -610,11 +623,16 @@ def render_overlay(snap: dict) -> str:
         tone = TONE.get(limit.get("bar_tone"), TONE["unknown"])
         value = pct_text(limit.get("used"))
         reset = limit.get("reset_text") or "--"
+        # A carried value keeps its tone colour (the level is still true) but
+        # is dimmed and starred, so the strip never passes it off as fresh.
+        stale = limit.get("stale")
+        mark = "<span class='st' title='%s'>*</span>" % esc(provider.get("note")) if stale else ""
         html_value = ("<span class='k'>%s</span>"
-                      "<span class='v' style='color:%s'>%s</span>"
+                      "<span class='v%s' style='color:%s'>%s</span>%s"
                       "<span class='r'>(%s)</span>"
-                      % (esc(label), tone, esc(value), esc(reset)))
-        return html_value, value, reset
+                      % (esc(label), " stale" if stale else "", tone,
+                         esc(value), mark, esc(reset)))
+        return html_value, value + ("*" if stale else ""), reset
 
     claude, claude_value, claude_reset = metric("claude-code", "Claude")
     fable, fable_value, fable_reset = metric("fable", "Fable")

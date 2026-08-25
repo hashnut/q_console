@@ -26,8 +26,32 @@ DEFAULTS = {
     # q_console never writes these files or copies their tokens into its cache.
     "claude_credentials_file": "~/.claude/.credentials.json",
     "codex_auth_file": "~/.codex/auth.json",
+    "claude_settings_file": "~/.claude/settings.json",
+    # Local session logs - the usage source for people on an API key, who have
+    # no plan percentage to read.
+    "claude_projects_dir": "~/.claude/projects",
+    "codex_sessions_dir": "~/.codex/sessions",
+
+    # API-key mode. Without a subscription there is no plan limit, so the gauge
+    # is month-to-date spend against a budget the user owns. 0 = not set, which
+    # shows "--" rather than a percentage of nothing.
+    # "auto" reads a subscription when one is signed in and falls back to the
+    # budget gauge otherwise; the other two force one side.
+    "usage_mode": "auto",
+    # Optional: an Admin key (sk-ant-admin01-...) upgrades the Claude number
+    # from "priced from this PC's logs" to real billed cost for the whole org.
+    # Anthropic issues these to organizations only, never personal accounts.
+    # ANTHROPIC_ADMIN_KEY in the environment is preferred - it keeps the secret
+    # out of this file. An ordinary API key is never stored here: it is only
+    # detected (env or Claude Code's settings.json) and never sent anywhere.
+    "anthropic_admin_key": "",
+    "claude_api_budget_usd": 100.0,
+    "codex_api_budget_tokens": 50_000_000,
 
     "warning_used_percent": 80,
+    # A failed read keeps showing the previous percentage for this long (the
+    # usual cause is an expired Claude Code token, fixed by opening the app).
+    "stale_max_age_sec": 24 * 3600,
     "theme": "surfacer",
     "always_on_top": False,
     # First launch opens the compact always-on-top strip at screen bottom-right.

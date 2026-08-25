@@ -8,6 +8,8 @@ gjc-backed exe still works exactly as before if you ever want it.
 
 Worker CLI (this is the contract tray.ps1 expects):
     --refresh                 rebuild the cache + detail.html, print the report
+    --set-usage-mode M        auto | subscription | api_key (auto detects)
+    --set-budget claude=100   API-key mode budget: claude=<USD>, codex=<tokens>
     --set-theme <id>          persist theme, re-render (surfacer|phosphor|mini)
     --set-always-on-top on|off
     --refresh-worker          accepted and ignored (the frozen build passed it)
@@ -18,6 +20,8 @@ Human CLI:
     --print                   text report to stdout, no files touched
     --install-autostart / --uninstall-autostart
     --install-startmenu / --uninstall-startmenu
+    --install-webview2        force a WebView2 runtime install (normally the
+                              first launch does this once, by itself)
 """
 
 from __future__ import annotations
@@ -32,7 +36,7 @@ if __package__ in (None, ""):  # allow `python core/__main__.py`
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     __package__ = "core"
 
-from core import config, render, snapshot  # noqa: E402
+from core import bootstrap, config, render, snapshot  # noqa: E402
 
 FROZEN = bool(getattr(sys, "frozen", False))
 BUNDLE_ROOT = (getattr(sys, "_MEIPASS", None) or
@@ -147,7 +151,9 @@ def refresh(cfg=None) -> dict:
         # never on every refresh, or a refresh could stomp a concurrent
         # theme switch with the value it loaded before the click.
         config.save(cfg)
-    snap = snapshot.build(cfg)
+    # The cached snapshot is the only place a previous good percentage lives,
+    # so it is what lets a failed read keep showing a number instead of "--".
+    snap = snapshot.build(cfg, previous=load_cached_snapshot())
     write_outputs(snap, cfg)
     return snap
 
@@ -207,6 +213,10 @@ def start_tray(open_detail: bool = False) -> int:
     config.ensure_home()
     cfg = config.load()
     config.save(cfg)          # make sure the tray can read a theme immediately
+    # The detail window is a WebView2 surface, and a machine that never had Edge
+    # may not carry the runtime. Fetch it once, in the background: the tray, the
+    # icon and the hover summary all work while that runs.
+    bootstrap.ensure_webview2_async()
     try:
         refresh(cfg)          # first paint has real data, not an empty window
     except Exception as exc:  # a bad refresh must not block the tray
@@ -325,13 +335,50 @@ def main(argv) -> int:
         config.update(overlay_mode=flag in ("on", "1", "true", "yes"))
         return 0
 
+    if "--set-usage-mode" in args:
+        index = args.index("--set-usage-mode")
+        name = (args[index + 1] if index + 1 < len(args) else "auto").lower()
+        if name not in ("auto", "subscription", "api_key"):
+            emit("usage-mode는 auto | subscription | api_key 중 하나여야 합니다")
+            return 2
+        emit("usage_mode=%s" % config.update(usage_mode=name)["usage_mode"])
+        return 0
+
+    if "--set-budget" in args:
+        # API-key mode gauges spend against this, so it is the one number the
+        # user has to own. USD for Claude, tokens for Codex.
+        index = args.index("--set-budget")
+        raw = args[index + 1] if index + 1 < len(args) else ""
+        try:
+            provider, amount = raw.split("=", 1)
+            amount = float(amount.replace("_", "").replace(",", ""))
+        except ValueError:
+            emit("사용법: --set-budget claude=<USD> | --set-budget codex=<tokens>")
+            return 2
+        if amount < 0:
+            emit("예산은 0 이상이어야 합니다 (0 = 미설정)")
+            return 2
+        key = {"claude": "claude_api_budget_usd",
+               "codex": "codex_api_budget_tokens"}.get(provider.lower())
+        if not key:
+            emit("사용법: --set-budget claude=<USD> | --set-budget codex=<tokens>")
+            return 2
+        emit("%s=%g" % (key, config.update(**{key: amount})[key]))
+        return 0
+
     if "--print" in args:
-        emit(snapshot.build(config.load())["detail_text"])
+        emit(snapshot.build(config.load(),
+                            previous=load_cached_snapshot())["detail_text"])
         return 0
 
     if "--refresh" in args:
         emit(refresh()["detail_text"])
         return 0
+
+    if "--install-webview2" in args:
+        result = bootstrap.ensure_webview2(force=True)
+        emit("webview2: %s · %s" % (result["status"], result["detail"]))
+        return 0 if result["status"] in ("present", "installed") else 1
 
     if "--install-autostart" in args:
         return install_autostart()
