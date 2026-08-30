@@ -110,6 +110,116 @@ public static extern int GetWindowLong(System.IntPtr hwnd, int index);
 public static extern int SetWindowLong(System.IntPtr hwnd, int index, int value);
 '@ -ErrorAction SilentlyContinue
 
+# The dashboard is hosted by powershell.exe, but it is q_console from the
+# shell's point of view. A WinForms Icon changes the pixels only; without an
+# explicit window AppUserModelID Windows still groups and pins the window as
+# PowerShell. The relaunch properties tell a taskbar pin to start q_console
+# itself, and to keep the app icon even while the window is closed.
+#
+# These properties are window-scoped because this PowerShell process also owns
+# the invisible tray infrastructure. Put ID last: Windows refreshes the taskbar
+# as soon as that property lands, so all relaunch metadata must already exist.
+Add-Type -Namespace UV -Name TaskbarIdentity -MemberDefinition @'
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, Pack = 4)]
+private struct PropertyKey {
+    public System.Guid FormatId;
+    public uint PropertyId;
+    public PropertyKey(System.Guid formatId, uint propertyId) {
+        FormatId = formatId;
+        PropertyId = propertyId;
+    }
+}
+
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Explicit, Size = 16)]
+private struct PropVariant {
+    [System.Runtime.InteropServices.FieldOffset(0)] public ushort VariantType;
+    [System.Runtime.InteropServices.FieldOffset(8)] public System.IntPtr PointerValue;
+}
+
+[System.Runtime.InteropServices.ComImport]
+[System.Runtime.InteropServices.Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")]
+[System.Runtime.InteropServices.InterfaceType(System.Runtime.InteropServices.ComInterfaceType.InterfaceIsIUnknown)]
+private interface IPropertyStore {
+    [System.Runtime.InteropServices.PreserveSig] int GetCount(out uint propertyCount);
+    [System.Runtime.InteropServices.PreserveSig] int GetAt(uint propertyIndex, out PropertyKey key);
+    [System.Runtime.InteropServices.PreserveSig] int GetValue(ref PropertyKey key, out PropVariant value);
+    [System.Runtime.InteropServices.PreserveSig] int SetValue(ref PropertyKey key, ref PropVariant value);
+    [System.Runtime.InteropServices.PreserveSig] int Commit();
+}
+
+[System.Runtime.InteropServices.DllImport("shell32.dll")]
+private static extern int SHGetPropertyStoreForWindow(
+    System.IntPtr windowHandle,
+    ref System.Guid interfaceId,
+    [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Interface)]
+    out IPropertyStore propertyStore);
+
+private static void SetString(IPropertyStore store, System.Guid formatId, uint propertyId, string value) {
+    PropertyKey key = new PropertyKey(formatId, propertyId);
+    PropVariant variant = new PropVariant();
+    variant.VariantType = 31; // VT_LPWSTR
+    variant.PointerValue = System.Runtime.InteropServices.Marshal.StringToCoTaskMemUni(value);
+    try {
+        System.Runtime.InteropServices.Marshal.ThrowExceptionForHR(
+            store.SetValue(ref key, ref variant));
+    } finally {
+        System.Runtime.InteropServices.Marshal.FreeCoTaskMem(variant.PointerValue);
+    }
+}
+
+public static void Apply(
+    System.IntPtr windowHandle,
+    string appId,
+    string relaunchCommand,
+    string displayName,
+    string iconResource) {
+    System.Guid storeId = new System.Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+    System.Guid appModelFormat = new System.Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
+    IPropertyStore store;
+    System.Runtime.InteropServices.Marshal.ThrowExceptionForHR(
+        SHGetPropertyStoreForWindow(windowHandle, ref storeId, out store));
+    try {
+        SetString(store, appModelFormat, 2, relaunchCommand);
+        SetString(store, appModelFormat, 4, displayName);
+        SetString(store, appModelFormat, 3, iconResource);
+        SetString(store, appModelFormat, 5, appId);
+        System.Runtime.InteropServices.Marshal.ThrowExceptionForHR(store.Commit());
+    } finally {
+        if (store != null && System.Runtime.InteropServices.Marshal.IsComObject(store)) {
+            System.Runtime.InteropServices.Marshal.ReleaseComObject(store);
+        }
+    }
+}
+'@ -ErrorAction SilentlyContinue
+
+$script:TaskbarAppId = 'Hashnut.QConsole'
+$script:TaskbarIconResource = (Join-Path $PSScriptRoot 'q_console.ico') + ',0'
+if ($WorkerArguments -eq '--refresh-worker') {
+    $script:TaskbarRelaunchCommand = '"' + $WorkerExecutable + '" --tray'
+} else {
+    # Source-mode launcher: WorkerArguments is the path to core/__main__.py.
+    $script:TaskbarRelaunchCommand = '"' + $WorkerExecutable + '" "' + $WorkerArguments + '" --tray'
+}
+
+function Set-TaskbarIdentity {
+    param($Form)
+    if (-not $Form -or $Form.IsDisposed) { return }
+    try {
+        [UV.TaskbarIdentity]::Apply(
+            $Form.Handle,
+            $script:TaskbarAppId,
+            $script:TaskbarRelaunchCommand,
+            'q_console',
+            $script:TaskbarIconResource)
+    } catch {
+        # Identity is shell integration, never a reason to lose the dashboard.
+        try {
+            ("taskbar identity failed: " + $_.Exception.ToString()) |
+                Out-File -Append -Encoding utf8 (Join-Path $AppHome 'tray-error.log')
+        } catch { }
+    }
+}
+
 function Set-AltTabHidden {
     # $Hidden=$true: tool window (no Alt-Tab, no taskbar). $false: normal app
     # window. Re-applied on HandleCreated because WinForms recreates the HWND
@@ -220,6 +330,7 @@ function Initialize-DetailHost {
         # here is what makes the next refresh stop re-rendering an unseen window.
         $form.add_HandleCreated({
             param($src, $e)
+            Set-TaskbarIdentity $src
             if ($script:WV2Overlay) { Set-AltTabHidden $src $true }
         })
         $form.add_FormClosing({

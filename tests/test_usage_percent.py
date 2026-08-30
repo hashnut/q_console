@@ -64,6 +64,26 @@ class UsagePresentationTests(unittest.TestCase):
     def test_first_launch_defaults_to_overlay(self):
         self.assertTrue(config.DEFAULTS["overlay_mode"])
 
+    def test_powershell_host_exposes_q_console_taskbar_identity(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "ui", "webview2-host.ps1"),
+                  encoding="utf-8") as fh:
+            host = fh.read()
+        with open(os.path.join(root, "ui", "tray.ps1"),
+                  encoding="utf-8") as fh:
+            tray = fh.read()
+
+        self.assertIn("Hashnut.QConsole", host)
+        self.assertIn("SHGetPropertyStoreForWindow", host)
+        self.assertIn("TaskbarRelaunchCommand", host)
+        self.assertIn("SetString(store, appModelFormat, 2, relaunchCommand)", host)
+        self.assertIn("SetString(store, appModelFormat, 4, displayName)", host)
+        self.assertIn("SetString(store, appModelFormat, 3, iconResource)", host)
+        self.assertIn("SetString(store, appModelFormat, 5, appId)", host)
+        self.assertIn("Set-TaskbarIdentity $src", host)
+        self.assertIn("Set-TaskbarIdentity $src", tray)
+        self.assertIn("@('q_console.ico', 'usage-view.ico')", tray)
+
     def setUp(self):
         self.now = int(dt.datetime(2026, 8, 24, 10, 30).timestamp())
         self.claude = {

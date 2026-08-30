@@ -469,9 +469,11 @@ function Show-DetailFallback {
     if (-not $script:FallbackForm -or $script:FallbackForm.IsDisposed) {
         $f = New-Object System.Windows.Forms.Form
         $f.Text = 'q_console'
-        $appIcon = Join-Path $PSScriptRoot 'usage-view.ico'
-        if (Test-Path $appIcon) {
-            try { $f.Icon = New-Object System.Drawing.Icon $appIcon } catch { }
+        foreach ($ic in @('q_console.ico', 'usage-view.ico')) {
+            $appIcon = Join-Path $PSScriptRoot $ic
+            if (Test-Path $appIcon) {
+                try { $f.Icon = New-Object System.Drawing.Icon $appIcon; break } catch { }
+            }
         }
         $f.ClientSize = New-Object System.Drawing.Size 720, 340
         $f.StartPosition = 'CenterScreen'
@@ -486,6 +488,7 @@ function Show-DetailFallback {
         $f.Tag = $box
         # Chrome is applied after Show() below, not here: DWM ignores the border
         # colour on a window that has never been shown.
+        $f.add_HandleCreated({ param($src, $e) Set-TaskbarIdentity $src })
         $f.add_Activated({ param($src, $e) Set-WindowChrome $src })
         $script:FallbackForm = $f
     }
