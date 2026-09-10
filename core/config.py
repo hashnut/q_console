@@ -56,7 +56,17 @@ DEFAULTS = {
     "always_on_top": False,
     # First launch opens the compact always-on-top strip at screen bottom-right.
     "overlay_mode": True,
+    "overlay_items": ["claude-code", "fable", "codex", "clock"],
 }
+
+
+def overlay_items(cfg: dict | None = None) -> list[str]:
+    """Canonical display order, with a safe default for old/corrupt settings."""
+    defaults = DEFAULTS["overlay_items"]
+    selected = (cfg or {}).get("overlay_items", defaults)
+    if not isinstance(selected, list):
+        return list(defaults)
+    return [item for item in defaults if item in selected] or list(defaults)
 
 THEME_ALIASES = {
     "board-ember": "surfacer", "board-slate": "surfacer", "board-abyss": "phosphor",

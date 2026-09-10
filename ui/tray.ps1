@@ -208,6 +208,48 @@ function Save-OverlayFlag {
     if ($script:OverlayItem) { $script:OverlayItem.Checked = $Value }
 }
 
+function Get-OverlayItems {
+    $all = @('claude-code', 'fable', 'codex', 'clock')
+    try {
+        $cfg = Get-Content -Raw -Encoding UTF8 (Join-Path $AppHome 'config.json') | ConvertFrom-Json
+        if ($cfg.overlay_items -is [array]) {
+            $selected = @($all | Where-Object { $_ -in $cfg.overlay_items })
+            if ($selected.Count -gt 0) { return $selected }
+        }
+    } catch { }
+    return $all
+}
+
+function Update-OverlayItemChecks {
+    foreach ($item in $script:OverlayDisplayItems) {
+        $item.Checked = ([string]$item.Tag -in $script:OverlaySelected)
+        # Keep at least one visible item, including the optional clock.
+        $item.Enabled = (-not $item.Checked -or $script:OverlaySelected.Count -gt 1)
+    }
+}
+
+function Start-NextOverlayItems {
+    if (-not $script:OverlayItemsPending) { return }
+    $next = $script:OverlayItemsPending
+    $script:OverlayItemsPending = $null
+    $script:OverlayItemsBusy = $true
+    $started = Start-Worker -Arguments @('--set-overlay-items', $next) -Kind 'overlay-items' -OnDone {
+        $script:OverlayItemsBusy = $false
+        if ($script:OverlayItemsPending) {
+            Start-NextOverlayItems
+            return
+        }
+        $script:OverlaySelected = @(Get-OverlayItems)
+        Update-OverlayItemChecks
+        if ((Test-OverlayMode) -and (Test-DetailOpen)) { [void](Update-DetailContent) }
+    }
+    if (-not $started) {
+        $script:OverlayItemsBusy = $false
+        $script:OverlaySelected = @(Get-OverlayItems)
+        Update-OverlayItemChecks
+    }
+}
+
 
 # ── tray icon: a percent badge sized for the shell, not for the canvas ───────
 # Measured on this PC: 144 DPI, SM_CXSMICON = 24, dark taskbar. The old painter
@@ -691,6 +733,28 @@ $script:OverlayItem.add_Click({
 })
 [void]$menu.Items.Add($script:OverlayItem)
 
+$script:OverlaySelected = @(Get-OverlayItems)
+$script:OverlayItemsPending = $null
+$script:OverlayItemsBusy = $false
+$script:OverlayDisplayItems = New-Object System.Collections.ArrayList
+$overlayItemsRoot = New-Object System.Windows.Forms.ToolStripMenuItem 'Overlay 표시 항목'
+foreach ($entry in @(@('claude-code', 'Claude'), @('fable', 'Fable'), @('codex', 'Codex'), @('clock', '시계'))) {
+    $mi = New-Object System.Windows.Forms.ToolStripMenuItem $entry[1]
+    $mi.Tag = $entry[0]
+    $mi.CheckOnClick = $true
+    $mi.add_Click({
+        $script:OverlaySelected = @($script:OverlayDisplayItems | Where-Object Checked | ForEach-Object { [string]$_.Tag })
+        Update-OverlayItemChecks
+        # Coalesce rapid clicks so an older worker cannot win the final choice.
+        $script:OverlayItemsPending = $script:OverlaySelected -join ','
+        if (-not $script:OverlayItemsBusy) { Start-NextOverlayItems }
+    })
+    [void]$script:OverlayDisplayItems.Add($mi)
+    [void]$overlayItemsRoot.DropDownItems.Add($mi)
+}
+Update-OverlayItemChecks
+[void]$menu.Items.Add($overlayItemsRoot)
+
 $script:AotItem = New-Object System.Windows.Forms.ToolStripMenuItem 'Always on Top'
 $script:AotItem.CheckOnClick = $true
 $script:AotItem.Checked = (Get-AlwaysOnTop)
@@ -723,6 +787,20 @@ $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = $PollMs
 $timer.add_Tick({ Update-Display -Refresh })
 $timer.Start()
+
+# Display recovery is independent of the 30-minute network refresh. Windows
+# can minimize the tool window or move it off-screen during display changes.
+$overlayTimer = New-Object System.Windows.Forms.Timer
+$overlayTimer.Interval = 2000
+$overlayTimer.add_Tick({
+    try { Repair-OverlayVisibility } catch {
+        try {
+            ("overlay recovery failed: " + $_.Exception.ToString()) |
+                Out-File -Append -Encoding utf8 (Join-Path $AppHome 'tray-error.log')
+        } catch { }
+    }
+})
+$overlayTimer.Start()
 
 # Visual-verification hook: refresh synchronously, render once, screenshot, exit.
 # Only this path may block, because it runs before the message loop starts.
@@ -816,4 +894,6 @@ if ($OpenDetail) {
 }
 [System.Windows.Forms.Application]::Run()
 $timer.Stop()
+$overlayTimer.Stop()
+$overlayTimer.Dispose()
 $icon.Dispose()

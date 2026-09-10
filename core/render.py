@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import html
 
+from .config import overlay_items
 from .util import fmt_age, fmt_tokens, fmt_usd
 
 TONE = {
@@ -613,7 +614,8 @@ OVERLAY_DRAG_SCRIPT = (
 )
 
 
-def render_overlay(snap: dict) -> str:
+def render_overlay(snap: dict, cfg: dict | None = None) -> str:
+    selected = overlay_items(cfg)
     by_id = {provider.get("id"): provider for provider in snap.get("providers") or []}
 
     def metric(provider_id, label):
@@ -634,17 +636,24 @@ def render_overlay(snap: dict) -> str:
                          esc(value), mark, esc(reset)))
         return html_value, value + ("*" if stale else ""), reset
 
-    claude, claude_value, claude_reset = metric("claude-code", "Claude")
-    fable, fable_value, fable_reset = metric("fable", "Fable")
-    codex, codex_value, codex_reset = metric("codex", "Codex")
-    segments = [
-        "<div class='seg'>%s%s%s</div>" % (ICON_CLAUDE, claude, fable),
-        "<div class='seg'>%s%s</div>" % (ICON_CODEX, codex),
-    ]
-    width = (24 + 38 + len(claude_value) * 7 + len(fable_value) * 7 +
-             len(codex_value) * 7 + 6 * (len("Claude") + len("Fable") +
-                                         len("Codex") + len(claude_reset) +
-                                         len(fable_reset) + len(codex_reset)) + 62)
+    segments = []
+    width = 24
+    for icon, providers in (
+        (ICON_CLAUDE, (("claude-code", "Claude"), ("fable", "Fable"))),
+        (ICON_CODEX, (("codex", "Codex"),)),
+    ):
+        metrics = []
+        for provider_id, label in providers:
+            if provider_id not in selected:
+                continue
+            markup, value, reset = metric(provider_id, label)
+            metrics.append(markup)
+            # Include flex gaps and the optional stale marker, not just glyphs.
+            width += len(value) * 7 + 6 * (len(label) + len(reset)) + 24
+        if metrics:
+            segments.append("<div class='seg'>%s%s</div>" % (icon, "".join(metrics)))
+            width += 19
+    width += 20 * max(0, len(segments) - 1)
     body = "<div class='div'></div>".join(segments)
     # Live wall clock, not the refresh stamp: the strip is only re-rendered every
     # poll (30 min), so a static stamp reads as a clock that has stopped. Ticks
@@ -658,7 +667,10 @@ def render_overlay(snap: dict) -> str:
         "function t(){var d=new Date();e.textContent=p(d.getHours())+':'+p(d.getMinutes());"
         "setTimeout(t,60000-(d.getSeconds()*1000+d.getMilliseconds())+50);}t();})();"
     )
-    width += 44
+    if "clock" in selected:
+        width += 44
+    else:
+        stamp = clock = ""
     return _shell("q_console overlay", OVERLAY_CSS,
                   body + stamp + "<script>%s%s</script>" % (OVERLAY_DRAG_SCRIPT, clock),
-                  max(320, min(700, width)), 32)
+                  max(80, min(700, width)), 32)

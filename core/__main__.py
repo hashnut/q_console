@@ -12,6 +12,7 @@ Worker CLI (this is the contract tray.ps1 expects):
     --set-budget claude=100   API-key mode budget: claude=<USD>, codex=<tokens>
     --set-theme <id>          persist theme, re-render (surfacer|phosphor|mini)
     --set-always-on-top on|off
+    --set-overlay-items codex,clock   visible overlay items (comma-separated)
     --refresh-worker          accepted and ignored (the frozen build passed it)
 
 Human CLI:
@@ -141,7 +142,7 @@ def write_outputs(snap: dict, cfg: dict) -> None:
     config.write_atomic(config.CACHE_PATH,
                         json.dumps(snap, ensure_ascii=False, indent=1))
     config.write_atomic(config.DETAIL_PATH, render.render(snap, cfg["theme"]))
-    config.write_atomic(config.OVERLAY_PATH, render.render_overlay(snap))
+    config.write_atomic(config.OVERLAY_PATH, render.render_overlay(snap, cfg))
 
 
 def refresh(cfg=None) -> dict:
@@ -154,7 +155,9 @@ def refresh(cfg=None) -> dict:
     # The cached snapshot is the only place a previous good percentage lives,
     # so it is what lets a failed read keep showing a number instead of "--".
     snap = snapshot.build(cfg, previous=load_cached_snapshot())
-    write_outputs(snap, cfg)
+    # A network refresh can finish after a display-settings worker. Use the
+    # latest presentation settings so that old in-flight work cannot undo a click.
+    write_outputs(snap, config.load())
     return snap
 
 
@@ -327,6 +330,19 @@ def main(argv) -> int:
         index = args.index("--set-always-on-top")
         flag = (args[index + 1] if index + 1 < len(args) else "off").lower()
         config.update(always_on_top=flag in ("on", "1", "true", "yes"))
+        return 0
+
+    if "--set-overlay-items" in args:
+        index = args.index("--set-overlay-items")
+        raw = args[index + 1] if index + 1 < len(args) else ""
+        items = [item.strip() for item in raw.split(",") if item.strip()]
+        if not items or any(item not in config.DEFAULTS["overlay_items"] for item in items):
+            emit("Choose at least one overlay item: claude-code,fable,codex,clock")
+            return 2
+        cfg = config.update(overlay_items=config.overlay_items({"overlay_items": items}))
+        snap = load_cached_snapshot()
+        if snap:
+            config.write_atomic(config.OVERLAY_PATH, render.render_overlay(snap, cfg))
         return 0
 
     if "--set-overlay" in args:

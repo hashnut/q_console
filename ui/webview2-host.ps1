@@ -108,6 +108,21 @@ Add-Type -Namespace UV -Name WinStyle -MemberDefinition @'
 public static extern int GetWindowLong(System.IntPtr hwnd, int index);
 [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
 public static extern int SetWindowLong(System.IntPtr hwnd, int index, int value);
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool ShowWindow(System.IntPtr hwnd, int command);
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool SetWindowPos(System.IntPtr hwnd, System.IntPtr after,
+    int x, int y, int width, int height, uint flags);
+'@ -ErrorAction SilentlyContinue
+
+# Prewarm and overlay recovery must never activate another window. Explicit
+# dashboard opens still call Activate() in Show-DetailHostWindow.
+Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition @'
+namespace UV {
+    public class DetailForm : System.Windows.Forms.Form {
+        protected override bool ShowWithoutActivation { get { return true; } }
+    }
+}
 '@ -ErrorAction SilentlyContinue
 
 # The dashboard is hosted by powershell.exe, but it is q_console from the
@@ -228,10 +243,11 @@ function Set-AltTabHidden {
     if (-not $Form -or $Form.IsDisposed) { return }
     try {
         $GWL_EXSTYLE = -20; $WS_EX_TOOLWINDOW = 0x80; $WS_EX_APPWINDOW = 0x40000
+        $WS_EX_NOACTIVATE = 0x08000000
         $h = $Form.Handle
         $ex = [UV.WinStyle]::GetWindowLong($h, $GWL_EXSTYLE)
-        if ($Hidden) { $ex = ($ex -bor $WS_EX_TOOLWINDOW) -band (-bnot $WS_EX_APPWINDOW) }
-        else         { $ex = ($ex -band (-bnot $WS_EX_TOOLWINDOW)) -bor $WS_EX_APPWINDOW }
+        if ($Hidden) { $ex = ($ex -bor $WS_EX_TOOLWINDOW -bor $WS_EX_NOACTIVATE) -band (-bnot $WS_EX_APPWINDOW) }
+        else         { $ex = ($ex -band (-bnot ($WS_EX_TOOLWINDOW -bor $WS_EX_NOACTIVATE))) -bor $WS_EX_APPWINDOW }
         [void][UV.WinStyle]::SetWindowLong($h, $GWL_EXSTYLE, $ex)
     } catch { }
 }
@@ -299,7 +315,7 @@ function Initialize-DetailHost {
     if (-not (Initialize-WebView2Assemblies)) { return $false }
 
     try {
-        $form = New-Object System.Windows.Forms.Form
+        $form = New-Object UV.DetailForm
         $form.Text = 'q_console'
         # Without this the window wears powershell.exe's icon in the title bar,
         # the taskbar and Alt-Tab, because that is the process hosting us.
@@ -531,8 +547,10 @@ function Test-DetailSurfaceLive {
     $f = $script:WV2Form
     if (-not $f.Visible) { return $false }
     if ($f.WindowState -eq [System.Windows.Forms.FormWindowState]::Minimized) { return $false }
-    if ($f.Location.X -lt -10000) { return $false }
-    return $true
+    foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) {
+        if ($screen.Bounds.IntersectsWith($f.Bounds)) { return $true }
+    }
+    return $false
 }
 
 # Point the engine at the file. Re-navigating the SAME uri is ignored, so an
@@ -560,6 +578,8 @@ function Invoke-DetailNavigate {
 function Resize-DetailToDocument {
     param([string]$Path)
     if (-not $script:WV2Form -or $script:WV2Form.IsDisposed) { return }
+    # Overlay documents are shorter than the dashboard's 100px guard below.
+    if ($script:WV2Overlay) { Set-OverlayGeometry; return }
     $w = 1080; $h = 640
     try {
         $head = [System.IO.File]::ReadAllText($Path)
@@ -578,7 +598,6 @@ function Resize-DetailToDocument {
     $prev = $script:WV2DocSize
     $script:WV2DocSize = @($w, $h)
     if ($prev -and $prev[0] -eq $w -and $prev[1] -eq $h) { return }
-    if ($script:WV2Overlay) { Set-OverlayGeometry; return }
     if ($script:WV2Form.WindowState -ne [System.Windows.Forms.FormWindowState]::Normal) { return }
     if ($script:WV2Form.ClientSize.Width -ne $w -or $script:WV2Form.ClientSize.Height -ne $h) {
         $script:WV2Form.ClientSize = New-Object System.Drawing.Size $w, $h
@@ -604,20 +623,60 @@ function Get-OverlayDocSize {
 }
 
 function Set-OverlayGeometry {
+    param([switch]$Repin)
     # Pin to the bottom-right of the working area at the document's native size.
-    # If the user drags it elsewhere we keep that position on
-    # later refreshes - only a size change re-pins.
+    # Changing visible items resizes in place; only entering overlay mode pins.
     $f = $script:WV2Form
     if (-not $f -or $f.IsDisposed) { return }
     $doc = Get-OverlayDocSize
     $newSize = New-Object System.Drawing.Size $doc[0], $doc[1]
-    $repin = ($f.ClientSize -ne $newSize) -or ($f.Location.X -lt -10000)
+    $shouldPin = $Repin -or ($f.Location.X -lt -10000)
     $f.ClientSize = $newSize
-    if ($repin) {
+    if ($shouldPin) {
         $screen = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
         $x = $screen.Right - $f.Width - 16
         $y = $screen.Bottom - $f.Height - 16
         $f.Location = New-Object System.Drawing.Point $x, $y
+    }
+}
+
+function Repair-OverlayVisibility {
+    # WV2Open is user intent. Closing a window explicitly clears it; neither a
+    # background refresh nor this timer may reopen a deliberately closed window.
+    $f = $script:WV2Form
+    if (-not $script:WV2Overlay -or -not $script:WV2Open -or
+        -not $f -or $f.IsDisposed) { return }
+    Set-AltTabHidden $f $true
+    if ($f.WindowState -ne [System.Windows.Forms.FormWindowState]::Normal -or -not $f.Visible) {
+        # SW_SHOWNOACTIVATE restores minimized windows without taking focus.
+        # Restore BEFORE inspecting bounds: minimized forms report -32000,-32000.
+        [void][UV.WinStyle]::ShowWindow($f.Handle, 4)
+    }
+    $contained = $false
+    foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) {
+        if ($screen.WorkingArea.Contains($f.Bounds)) { $contained = $true; break }
+    }
+    if (-not $contained) {
+        # Sleep, unplugging a monitor, or changing resolution can strand the
+        # strip outside the desktop. Keep a valid dragged position untouched.
+        $work = [System.Windows.Forms.Screen]::FromRectangle($f.Bounds).WorkingArea
+        $x = [Math]::Max($work.Left, [Math]::Min($f.Left, $work.Right - $f.Width))
+        $y = [Math]::Max($work.Top, [Math]::Min($f.Top, $work.Bottom - $f.Height))
+        $f.Location = New-Object System.Drawing.Point $x, $y
+    }
+    Set-OverlayTopMost
+    if ($script:WV2Dirty -and (Test-DetailHostReady) -and (Test-DetailSurfaceLive)) {
+        Invoke-DetailNavigate (Get-ActiveDetailPath)
+    }
+}
+
+function Set-OverlayTopMost {
+    $f = $script:WV2Form
+    if (-not $f -or $f.IsDisposed) { return }
+    # Form.TopMost uses SetWindowPos WITHOUT SWP_NOACTIVATE. Use the native
+    # flag and inspect the native style, keeping background repair focus-free.
+    if (([UV.WinStyle]::GetWindowLong($f.Handle, -20) -band 8) -eq 0) {
+        [void][UV.WinStyle]::SetWindowPos($f.Handle, [IntPtr](-1), 0, 0, 0, 0, 0x13)
     }
 }
 
@@ -635,12 +694,12 @@ function Set-OverlayMode {
         $f.FormBorderStyle = 'None'
         # The board window's minimum would clamp the compact strip height.
         $f.MinimumSize = New-Object System.Drawing.Size 0, 0
-        $f.TopMost = $true
         $f.Opacity = 0.90
         $f.ShowInTaskbar = $false
-        Set-OverlayGeometry
+        Set-OverlayGeometry -Repin
         Set-AltTabHidden $f $true
         if (-not $f.Visible) { $f.Show() }
+        Set-OverlayTopMost
         $script:WV2Open = $true
         Invoke-DetailNavigate (Get-ActiveDetailPath)   # swap to overlay.html
     } else {
@@ -674,14 +733,9 @@ function Show-DetailHostWindow {
     if ($script:WV2Overlay) {
         # Overlay is its own placement policy: corner-pinned, topmost, no
         # taskbar. A "show" gesture just makes sure it is on screen.
-        if ($f.Location.X -lt -10000) { Set-OverlayGeometry }
-        if (-not $f.Visible) { $f.Show() }
-        Set-AltTabHidden $f $true
-        $f.TopMost = $true
         $script:WV2Open = $true
-        if ($script:WV2Dirty) {
-            Invoke-DetailNavigate (Get-ActiveDetailPath)
-        }
+        Repair-OverlayVisibility
+        Set-AltTabHidden $f $true
         return
     }
     if ($f.WindowState -eq [System.Windows.Forms.FormWindowState]::Minimized) {
@@ -718,7 +772,8 @@ function Set-DetailTopMost {
     param([bool]$Value)
     $script:WV2AlwaysOnTop = $Value
     if ($script:WV2Form -and -not $script:WV2Form.IsDisposed) {
-        $script:WV2Form.TopMost = $Value
+        if ($script:WV2Overlay) { Set-OverlayTopMost }
+        else { $script:WV2Form.TopMost = $Value }
     }
 }
 

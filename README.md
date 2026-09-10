@@ -51,6 +51,8 @@ q_console.cmd --print    텍스트 사용률 출력
 
 트레이 아이콘 **좌클릭 = 대시보드**, **우클릭 = Refresh / Theme / Overlay / Always on Top / Exit**.
 30분마다 자동 갱신하며 Refresh를 누르면 즉시 다시 조회합니다. 첫 실행 기본값은 Overlay ON입니다.
+트레이 우클릭 → **Overlay 표시 항목**에서 Claude / Fable / Codex / 시계를 각각 켜고 끌 수 있습니다.
+선택은 재시작 후에도 유지되며, 표시하는 항목에 맞춰 오버레이 폭이 줄어듭니다. 최소 한 항목은 켜 두어야 합니다.
 
 ## 데이터 기준
 
