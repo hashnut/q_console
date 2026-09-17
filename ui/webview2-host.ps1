@@ -111,6 +111,8 @@ public static extern int SetWindowLong(System.IntPtr hwnd, int index, int value)
 [System.Runtime.InteropServices.DllImport("user32.dll")]
 public static extern bool ShowWindow(System.IntPtr hwnd, int command);
 [System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool IsWindowVisible(System.IntPtr hwnd);
+[System.Runtime.InteropServices.DllImport("user32.dll")]
 public static extern bool SetWindowPos(System.IntPtr hwnd, System.IntPtr after,
     int x, int y, int width, int height, uint flags);
 '@ -ErrorAction SilentlyContinue
@@ -249,6 +251,11 @@ function Set-AltTabHidden {
         if ($Hidden) { $ex = ($ex -bor $WS_EX_TOOLWINDOW -bor $WS_EX_NOACTIVATE) -band (-bnot $WS_EX_APPWINDOW) }
         else         { $ex = ($ex -band (-bnot ($WS_EX_TOOLWINDOW -bor $WS_EX_NOACTIVATE))) -bor $WS_EX_APPWINDOW }
         [void][UV.WinStyle]::SetWindowLong($h, $GWL_EXSTYLE, $ex)
+        # Keep the strip visible during taskbar/desktop Peek as well. This DWM
+        # policy belongs to the HWND, so reapply it after handle recreation and
+        # restore normal Peek behaviour when returning to the dashboard.
+        $excludeFromPeek = [int]$Hidden
+        [void][UV.Chrome]::DwmSetWindowAttribute($h, 12, [ref]$excludeFromPeek, 4)
     } catch { }
 }
 
@@ -647,7 +654,8 @@ function Repair-OverlayVisibility {
     if (-not $script:WV2Overlay -or -not $script:WV2Open -or
         -not $f -or $f.IsDisposed) { return }
     Set-AltTabHidden $f $true
-    if ($f.WindowState -ne [System.Windows.Forms.FormWindowState]::Normal -or -not $f.Visible) {
+    if ($f.WindowState -ne [System.Windows.Forms.FormWindowState]::Normal -or
+        -not $f.Visible -or -not [UV.WinStyle]::IsWindowVisible($f.Handle)) {
         # SW_SHOWNOACTIVATE restores minimized windows without taking focus.
         # Restore BEFORE inspecting bounds: minimized forms report -32000,-32000.
         [void][UV.WinStyle]::ShowWindow($f.Handle, 4)
@@ -673,11 +681,18 @@ function Repair-OverlayVisibility {
 function Set-OverlayTopMost {
     $f = $script:WV2Form
     if (-not $f -or $f.IsDisposed) { return }
-    # Form.TopMost uses SetWindowPos WITHOUT SWP_NOACTIVATE. Use the native
-    # flag and inspect the native style, keeping background repair focus-free.
+    # TOPMOST is a window group, not a guarantee that this HWND is above its
+    # siblings. Windows/shell activity can leave the bit set while covering us
+    # with another topmost window. Reassert the Z order on every recovery pass.
+    # SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE preserves placement and focus;
+    # Form.TopMost/Activate/BringToFront would risk interrupting the user's app.
+    # Handle recreation/style updates can also leave the native TOPMOST bit
+    # out of sync with the Z-order group. Reset that stale membership before
+    # promoting: HWND_TOPMOST alone can report success without restoring it.
     if (([UV.WinStyle]::GetWindowLong($f.Handle, -20) -band 8) -eq 0) {
-        [void][UV.WinStyle]::SetWindowPos($f.Handle, [IntPtr](-1), 0, 0, 0, 0, 0x13)
+        [void][UV.WinStyle]::SetWindowPos($f.Handle, [IntPtr](-2), 0, 0, 0, 0, 0x13)
     }
+    [void][UV.WinStyle]::SetWindowPos($f.Handle, [IntPtr](-1), 0, 0, 0, 0, 0x13)
 }
 
 function Set-OverlayMode {

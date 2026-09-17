@@ -11,6 +11,18 @@ Add-Type -TypeDefinition @'
 public class OverlayTestNative {
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     public static extern System.IntPtr GetForegroundWindow();
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    public static extern System.IntPtr GetWindow(System.IntPtr hwnd, uint command);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(System.IntPtr hwnd);
+
+    public static bool IsAbove(System.IntPtr upper, System.IntPtr lower) {
+        // GW_HWNDPREV walks towards the top of the actual native Z order.
+        for (var h = GetWindow(lower, 3); h != System.IntPtr.Zero; h = GetWindow(h, 3)) {
+            if (h == upper) return true;
+        }
+        return false;
+    }
 }
 '@
 function Assert-True($Condition, [string]$Message) {
@@ -77,8 +89,46 @@ try {
     Pump-Events 2300
     Assert-Focus 'timer restore'
     Assert-True ($f.WindowState -eq 'Normal') 'Periodic recovery did not restore overlay'
+
+    # A second topmost HWND can cover an overlay whose TOPMOST bit is still set.
+    # Testing just that bit misses the regression: assert the real Z order.
+    $cover = New-Object UV.DetailForm
+    $cover.FormBorderStyle = 'None'
+    $cover.ShowInTaskbar = $false
+    $cover.StartPosition = 'Manual'
+    $cover.Bounds = $f.Bounds
+    $cover.Opacity = 0
+    Set-AltTabHidden $cover $true
+    $cover.Show()
+    [void][UV.WinStyle]::SetWindowPos($cover.Handle, [IntPtr](-1), 0, 0, 0, 0, 0x13)
+    Assert-True ([OverlayTestNative]::IsAbove($cover.Handle, $f.Handle)) 'Covering-window precondition failed'
+    Assert-True (([UV.WinStyle]::GetWindowLong($f.Handle, -20) -band 8) -ne 0) 'Overlay lost TOPMOST before test'
+    Pump-Events 2300
+    Assert-Focus 'timer Z-order repair'
+    Assert-True ([OverlayTestNative]::IsAbove($f.Handle, $cover.Handle)) 'Topmost overlay stayed behind another topmost window'
+    Assert-True ($f.Bounds -eq $bounds) 'Z-order recovery moved or resized the strip'
+    # Repeated foreground changes must not consume a one-shot repair.
+    1..3 | ForEach-Object {
+        [void][UV.WinStyle]::SetWindowPos($cover.Handle, [IntPtr](-1), 0, 0, 0, 0, 0x13)
+        Repair-OverlayVisibility
+        Assert-True ([OverlayTestNative]::IsAbove($f.Handle, $cover.Handle)) 'Repeated Z-order recovery failed'
+    }
+    $cover.Dispose()
     $overlayTimer.Stop()
 
+    [void][UV.WinStyle]::SetWindowPos($f.Handle, [IntPtr](-2), 0, 0, 0, 0, 0x13)
+    Assert-True (([UV.WinStyle]::GetWindowLong($f.Handle, -20) -band 8) -eq 0) 'Topmost-demotion precondition failed'
+    Repair-OverlayVisibility
+    Assert-True (([UV.WinStyle]::GetWindowLong($f.Handle, -20) -band 8) -ne 0) 'Native topmost demotion was not repaired'
+    # Reproduce stale style/group state from WinForms HWND/style recreation.
+    $styles = [UV.WinStyle]::GetWindowLong($f.Handle, -20)
+    [void][UV.WinStyle]::SetWindowLong($f.Handle, -20, ($styles -band (-bnot 8)))
+    Repair-OverlayVisibility
+    Assert-True (([UV.WinStyle]::GetWindowLong($f.Handle, -20) -band 8) -ne 0) 'Stale native topmost membership was not repaired'
+    [void][UV.WinStyle]::ShowWindow($f.Handle, 0)
+    Assert-True (-not [OverlayTestNative]::IsWindowVisible($f.Handle)) 'Native-hide precondition failed'
+    Repair-OverlayVisibility
+    Assert-True ([OverlayTestNative]::IsWindowVisible($f.Handle)) 'Native-hidden overlay was not restored'
     $f.Hide()
     Repair-OverlayVisibility
     Assert-True $f.Visible 'Externally hidden overlay was not restored'
@@ -131,8 +181,9 @@ try {
     Set-DetailTopMost $false
     Assert-True (-not $f.TopMost) 'Dashboard topmost preference was ignored'
     Assert-Focus 'final'
-    Write-Output 'PASS: overlay restore, timer, monitor recovery, position, topmost, deferred refresh, explicit close, dashboard, focus'
+    Write-Output 'PASS: overlay restore, timer Z order, repeated covering, native hide/demotion, stale styles, monitor recovery, position, deferred refresh, explicit close, dashboard, focus'
 } finally {
+    if ($cover) { $cover.Dispose() }
     if ($overlayTimer) { $overlayTimer.Stop(); $overlayTimer.Dispose() }
     $f.Dispose()
 }

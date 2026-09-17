@@ -789,9 +789,10 @@ $timer.add_Tick({ Update-Display -Refresh })
 $timer.Start()
 
 # Display recovery is independent of the 30-minute network refresh. Windows
-# can minimize the tool window or move it off-screen during display changes.
+# can minimize/hide the tool window, cover it with another topmost window, or
+# move it off-screen during display changes. Recover without taking focus.
 $overlayTimer = New-Object System.Windows.Forms.Timer
-$overlayTimer.Interval = 2000
+$overlayTimer.Interval = 1000
 $overlayTimer.add_Tick({
     try { Repair-OverlayVisibility } catch {
         try {
