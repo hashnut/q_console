@@ -1,10 +1,13 @@
 """Build the account-usage model consumed by the tray and renderer.
 
-Only three percentages are exposed:
+Three providers are exposed:
 
 * Claude Code weekly usage (all models)
 * Fable weekly scoped usage
 * Codex weekly usage
+
+Enterprise usage-based seats show monthly account spend and its actual cap.
+Codex reset credits are separate counts, never percentages or spend budgets.
 
 All three come from the current authenticated account endpoints. Local token
 logs and list-price estimates are deliberately not used as quota values.
@@ -35,9 +38,18 @@ def _limit(key: str, label: str, value: dict, now: int, warn: int,
     used = clamp_pct(value.get("used"))
     resets_at = value.get("resets_at")
     reset_in = max(0, resets_at - now) if resets_at else None
-    stale = bool(stale and used is not None)
+    stale = bool(stale and (used is not None or value.get("amount") is not None))
     unit = value.get("unit")
-    if unit:
+    account_spend = bool(value.get("account_spend"))
+    if account_spend:
+        currency = value.get("currency") or "USD"
+        amount, budget = value.get("amount"), value.get("budget")
+        primary = _account_money(amount, currency)
+        budget_text = "한도 %s" % _account_money(budget, currency) if budget is not None else "한도 미제공"
+        sub = "%s / %s · 계정 Usage 실측" % (primary, budget_text)
+        if stale:
+            sub += " · %s 마지막 실측" % _stamp_text(measured_at)
+    elif unit:
         # API-key mode: the percentage is spend against a budget the user set,
         # not a plan limit, so it must not wear the "실측" badge.
         primary, budget_text, sub = _budget_texts(value, unit)
@@ -49,14 +61,17 @@ def _limit(key: str, label: str, value: dict, now: int, warn: int,
         "key": key,
         "label": label,
         "used": used,
-        "measured": not unit,
+        "measured": not unit or account_spend,
         "stale": stale,
         "unit": unit,
         "amount": value.get("amount"),
         "budget": value.get("budget"),
+        "account_spend": account_spend,
+        "currency": value.get("currency"),
+        "period": _dt.datetime.fromtimestamp(now).strftime("%Y-%m") if account_spend else None,
         # Epoch seconds of the account read this percentage came from, so a
         # later refresh can tell how old a carried value is.
-        "measured_at": measured_at if used is not None else None,
+        "measured_at": measured_at if used is not None or value.get("amount") is not None else None,
         "resets_at": resets_at,
         "primary_text": primary,
         "budget_text": budget_text,
@@ -65,6 +80,12 @@ def _limit(key: str, label: str, value: dict, now: int, warn: int,
         "reset_text": fmt_dur(reset_in) if resets_at else "--",
         "bar_tone": tone_for(used, warn),
     }
+
+
+def _account_money(amount, currency) -> str:
+    if amount is None:
+        return "--"
+    return ("$%.2f" % amount) if currency == "USD" else "%s %.2f" % (currency, amount)
 
 
 def _budget_texts(value: dict, unit: str) -> tuple:
@@ -98,7 +119,7 @@ def _prior_limits(previous) -> dict:
             continue
         limits = provider.get("limits") or []
         if limits and isinstance(limits[0], dict):
-            prior[provider.get("id")] = limits[0]
+            prior[provider.get("id")] = dict(limits[0], provider_plan=provider.get("plan"))
     return prior
 
 
@@ -112,12 +133,18 @@ def _carry_forward(limit: dict, prior, now: int, warn: int, max_age: int,
     quantities, and one must never be shown wearing the other's label. In those
     cases the caller keeps the honest "--".
     """
-    if limit["used"] is not None or not isinstance(prior, dict):
+    if limit["used"] is not None or limit.get("amount") is not None or not isinstance(prior, dict):
         return limit
-    if bool(prior.get("unit")) != bool(api_mode):
+    if bool(prior.get("account_spend")) != bool(limit.get("account_spend")):
+        return limit
+    if prior.get("key") != limit["key"]:
+        return limit
+    if limit.get("account_spend") and prior.get("period") != limit.get("period"):
+        return limit
+    if not limit.get("account_spend") and bool(prior.get("unit")) != bool(api_mode):
         return limit
     used = clamp_pct(prior.get("used"))
-    if used is None:
+    if used is None and prior.get("amount") is None:
         return limit
     measured_at = prior.get("measured_at")
     if not isinstance(measured_at, (int, float)) or now - measured_at > max_age:
@@ -126,7 +153,7 @@ def _carry_forward(limit: dict, prior, now: int, warn: int, max_age: int,
     if resets_at and resets_at <= now:
         return limit  # the window rolled over; the old percentage is void
     carried = {"used": used, "resets_at": resets_at}
-    for field in ("unit", "amount", "budget", "billed"):
+    for field in ("unit", "amount", "budget", "billed", "account_spend", "currency"):
         if prior.get(field) is not None:
             carried[field] = prior[field]
     return _limit(limit["key"], limit["label"], carried, now, warn,
@@ -192,7 +219,7 @@ def _pct_text(limit: dict) -> str:
     """Percent for the one-line summaries; a trailing * means carried forward."""
     used = limit.get("used")
     if used is None:
-        return "--"
+        return (limit.get("primary_text") or "--") + ("*" if limit.get("stale") else "")
     return "%.0f%%%s" % (used, "*" if limit.get("stale") else "")
 
 
@@ -217,21 +244,32 @@ def build(cfg: dict, previous=None) -> dict:
     claude, codex = _read_current(cfg, now)
     prior = _prior_limits(previous)
     specs = [
-        ("claude-code", "Claude Code", claude, claude.get("all_models") or {}, None),
-        ("fable", "Fable", claude, claude.get("fable") or {}, None),
+        ("claude-code", "Claude Enterprise" if claude.get("plan") == "enterprise" else "Claude Code",
+         claude, claude.get("all_models") or {}, claude.get("plan")),
+        ("fable", "Fable", claude, claude.get("fable") or {}, claude.get("plan")),
         ("codex", "Codex", codex, codex.get("weekly") or {}, codex.get("plan")),
     ]
     providers = []
     for provider_id, label, raw, value, plan in specs:
-        limit = _limit("week", "주간 사용량", value, now, warn, measured_at=now)
-        limit = _carry_forward(limit, prior.get(provider_id), now, warn,
+        limit = _limit(value.get("window_key") or "week",
+                       value.get("window_label") or "주간 사용량",
+                       value, now, warn, measured_at=now)
+        previous_limit = prior.get(provider_id)
+        if plan is not None and previous_limit and previous_limit.get("provider_plan") != plan:
+            previous_limit = None
+        limit = _carry_forward(limit, previous_limit, now, warn,
                                max_age, api_mode=raw.get("mode") == "api_key")
-        providers.append(_provider(provider_id, label, raw, limit, plan))
+        provider = _provider(provider_id, label, raw, limit, plan)
+        if provider_id == "codex":
+            provider["reset_credits"] = raw.get("reset_credits") or {
+                "available_count": None, "applicable_available_count": None}
+        providers.append(provider)
     verdict, mode = _verdict(providers)
     stamp = _dt.datetime.fromtimestamp(now)
 
     summary = [("%s %s" % (p["label"], _pct_text(p["limits"][0])))
                for p in providers]
+    summary[-1] += " · " + reset_credit_text(providers[-1].get("reset_credits"))
 
     return {
         "generated_at_ms": now * 1000,
@@ -279,14 +317,25 @@ def text_report(providers: list[dict], stamp: _dt.datetime) -> str:
             if limit.get("unit") else ""))
         if provider["status"] != "ok":
             lines.append("  %s" % provider["note"])
+        if provider.get("reset_credits") is not None:
+            lines.append("  " + reset_credit_text(provider["reset_credits"]))
     lines.append("")
-    if any(p["limits"][0].get("unit") for p in providers):
+    if any(p["limits"][0].get("unit") and not p["limits"][0].get("account_spend") for p in providers):
         # API-key mode: the percentage is a budget gauge, not a plan limit, and
         # the report has to say so or it reads like an account number.
         lines.append("API 키 모드 · 퍼센트는 이번 달 사용량 ÷ 설정한 예산입니다.")
         lines.append("예산 변경: q_console --set-budget claude=<USD> | codex=<tokens>")
     else:
-        lines.append("모든 퍼센트는 현재 로그인 계정의 Usage 응답값입니다.")
+        lines.append("사용률과 Enterprise 금액은 현재 로그인 계정의 Usage 응답값입니다.")
     if any(p["limits"][0].get("stale") for p in providers):
         lines.append("* 는 이번 조회 실패로 직전 실측값을 유지한 항목입니다.")
     return "\n".join(lines)
+
+
+def reset_credit_text(credits) -> str:
+    credits = credits or {}
+    available = credits.get("available_count")
+    applicable = credits.get("applicable_available_count")
+    return "리셋권 %s · 사용 가능 %s" % (
+        "--" if available is None else "%d개" % available,
+        "--" if applicable is None else "%d개" % applicable)

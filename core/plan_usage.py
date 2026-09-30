@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import math
 import urllib.error
 import urllib.request
 
@@ -63,8 +64,32 @@ def _number(value) -> float | None:
     if value is None or isinstance(value, bool):
         return None
     try:
-        return max(0.0, min(100.0, float(value)))
+        number = float(value)
+        return max(0.0, min(100.0, number)) if math.isfinite(number) else None
     except (TypeError, ValueError):
+        return None
+
+
+def _count(value) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+        return int(number) if math.isfinite(number) and number >= 0 and number.is_integer() else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _money(value, exponent=2) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        digits = _count(exponent)
+        if digits is None or digits > 6:
+            return None
+        amount = float(value) / (10 ** digits)
+        return amount if math.isfinite(amount) and amount >= 0 else None
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -86,7 +111,7 @@ def _claude_limit(data: dict, kind: str, model_name: str | None = None) -> dict:
     return {"used": None, "resets_at": None}
 
 
-def extract_claude(data: dict) -> dict:
+def extract_claude(data: dict, plan: str | None = None) -> dict:
     all_models = _claude_limit(data, "weekly_all")
     fable = _claude_limit(data, "weekly_scoped", "Fable")
 
@@ -103,15 +128,44 @@ def extract_claude(data: dict) -> dict:
             "used": _number(legacy.get("utilization")),
             "resets_at": _iso_epoch(legacy.get("resets_at")),
         }
-    return {"all_models": all_models, "fable": fable}
+    if plan == "enterprise":
+        # Enterprise usage-based seats report money instead of weekly limits.
+        # The current client prefers spend; older responses use extra_usage.
+        spend = data.get("spend") or {}
+        extra = data.get("extra_usage") or {}
+        if all_models["used"] is None:
+            used_money = spend.get("used") or {}
+            limit_money = spend.get("limit") or {}
+            currency = used_money.get("currency") or extra.get("currency") or "USD"
+            amount = _money(used_money.get("amount_minor"), used_money.get("exponent", 2))
+            budget = _money(limit_money.get("amount_minor"), limit_money.get("exponent", 2))
+            if amount is None:
+                amount = _money(extra.get("used_credits"), extra.get("decimal_places", 2))
+            if budget is None and not spend:
+                budget = _money(extra.get("monthly_limit"), extra.get("decimal_places", 2))
+            if limit_money and limit_money.get("currency", currency) != currency:
+                budget = None  # amounts in different currencies cannot form a ratio
+            used = None
+            if budget:
+                used = (_number(amount / budget * 100) if amount is not None
+                        else _number(spend.get("percent", extra.get("utilization"))))
+            all_models = {
+                "used": used, "resets_at": _iso_epoch(spend.get("resets_at")),
+                "unit": "money", "currency": str(currency),
+                "amount": amount, "budget": budget, "account_spend": True,
+                "window_key": "month", "window_label": "월간 사용량",
+            }
+    return {"all_models": all_models, "fable": fable, "plan": plan}
 
 
 def collect_claude(cfg: dict) -> dict:
     path = config.expand(cfg.get("claude_credentials_file") or
                          "~/.claude/.credentials.json")
+    plan = None
     try:
         credentials = _load_json(path)
         oauth = credentials.get("claudeAiOauth") or {}
+        plan = oauth.get("subscriptionType")
         token = oauth.get("accessToken")
         if not token:
             raise RuntimeError("Claude login not found")
@@ -121,14 +175,16 @@ def collect_claude(cfg: dict) -> dict:
             "Accept": "application/json",
             "User-Agent": "q_console/1.0 (Claude Code usage)",
         })
-        limits = extract_claude(data)
+        limits = extract_claude(data, plan)
         return {"status": "ok", "note": "Claude 계정 Usage 실측", **limits}
     except (OSError, ValueError, RuntimeError) as exc:
+        note = "Claude 사용률 확인 실패: %s" % exc
+        if str(exc) == "HTTP 401":
+            note += " · Claude Code에서 /usage 실행 후 Refresh"
         return {
             "status": "unavailable",
-            "note": "Claude 사용률 확인 실패: %s" % exc,
-            "all_models": {"used": None, "resets_at": None},
-            "fable": {"used": None, "resets_at": None},
+            "note": note,
+            **extract_claude({}, plan),
         }
 
 
@@ -154,12 +210,17 @@ def extract_codex(data: dict) -> dict:
         reset_at = int(reset_at) if reset_at is not None else None
     except (TypeError, ValueError, OverflowError):
         reset_at = None
+    reset_credits = data.get("rate_limit_reset_credits") or {}
     return {
         "weekly": {
             "used": _number(weekly.get("used_percent")),
             "resets_at": reset_at,
         },
         "plan": data.get("plan_type"),
+        "reset_credits": {
+            "available_count": _count(reset_credits.get("available_count")),
+            "applicable_available_count": _count(reset_credits.get("applicable_available_count")),
+        },
     }
 
 
@@ -186,4 +247,5 @@ def collect_codex(cfg: dict) -> dict:
             "note": "Codex 사용률 확인 실패: %s" % exc,
             "weekly": {"used": None, "resets_at": None},
             "plan": None,
+            "reset_credits": {"available_count": None, "applicable_available_count": None},
         }

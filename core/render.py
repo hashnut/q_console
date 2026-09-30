@@ -20,6 +20,7 @@ from __future__ import annotations
 import html
 
 from .config import overlay_items
+from .snapshot import reset_credit_text
 from .util import fmt_age, fmt_tokens, fmt_usd
 
 TONE = {
@@ -149,6 +150,8 @@ def limit_row(limit, hero=False):
     else:
         badge = "<span class='badge budget'>예산 기준</span>"
     if hero:
+        value = (limit.get("primary_text") if limit.get("account_spend") and limit.get("used") is None
+                 else pct_text(limit.get("used")))
         return (
             "<div class='hero'>"
             "<div class='hero-num' style='color:%s'>%s</div>"
@@ -156,7 +159,7 @@ def limit_row(limit, hero=False):
             "<div class='hero-sub'>%s</div></div>"
             "<div class='hero-reset'><b>%s</b><span>리셋</span></div>"
             "</div>%s"
-            % (colour, pct_text(limit.get("used")), esc(limit.get("label")), badge,
+            % (colour, esc(value), esc(limit.get("label")), badge,
                esc(limit.get("sub")), esc(limit.get("reset_text")),
                bar(limit.get("used"), tone, 12)))
     return (
@@ -217,6 +220,8 @@ def provider_card(provider):
         body = limit_row(limits[0], hero=True) + extra
         if provider.get("status") != "ok":
             body += "<div class='metric-note'>%s</div>" % esc(provider.get("note"))
+        if provider.get("reset_credits") is not None:
+            body += "<div class='account-info'>%s</div>" % esc(reset_credit_text(provider["reset_credits"]))
     meta = []
     if provider.get("plan"):
         meta.append("plan %s" % provider["plan"])
@@ -257,9 +262,9 @@ body{background:#0a0c0f}
 .card .meta{margin-left:auto;color:#69737f;font-size:10.5px;text-align:right}
 .hero{display:flex;align-items:flex-end;gap:12px}
 .hero-num{font-size:46px;line-height:.94;font-weight:800;font-variant-numeric:tabular-nums}
-.hero-meta{padding-bottom:3px}
+.hero-meta{padding-bottom:3px;min-width:0;flex:1}
 .hero-label{font-size:12px;color:#c7ced7;font-weight:600}
-.hero-sub{font-size:11px;color:#7b8590;margin-top:2px;font-variant-numeric:tabular-nums}
+.hero-sub{font-size:11px;color:#7b8590;margin-top:2px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .hero-reset{margin-left:auto;text-align:right;padding-bottom:3px}
 .hero-reset b{display:block;font-size:15px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .hero-reset span{font-size:10px;color:#69737f;letter-spacing:.1em}
@@ -295,6 +300,7 @@ body{background:#0a0c0f}
 .empty{color:#69737f;font-size:13px;padding:24px 0;text-align:center}
 .empty span{font-size:11px;color:#4e5761}
 .metric-note{font-size:10px;color:#f2c14e;margin-top:5px}
+.account-info{font-size:11px;color:#a8b1bb;margin-top:6px}
 .heats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:auto}
 .heat{background:#11151a;border:1px solid #1d232b;border-radius:11px;padding:10px 12px 8px}
 .heat-title{font-size:10px;color:#69737f;letter-spacing:.1em;margin-bottom:6px}
@@ -330,7 +336,8 @@ body:after{content:'';position:fixed;inset:0;pointer-events:none;
 .hero{display:flex;align-items:flex-end;gap:10px}
 .hero-num{font-size:40px;line-height:1;font-weight:700}
 .hero-label{font-size:12px}
-.hero-sub{font-size:11px;color:#3d9c7b}
+.hero-meta{min-width:0;flex:1}
+.hero-sub{font-size:11px;color:#3d9c7b;overflow-wrap:anywhere}
 .hero-reset{margin-left:auto;text-align:right}
 .hero-reset b{display:block;font-size:14px;white-space:nowrap}
 .hero-reset span{font-size:9px;color:#2f7f63}
@@ -359,6 +366,7 @@ body:after{content:'';position:fixed;inset:0;pointer-events:none;
 .spark-bar{width:100%}
 .empty{padding:22px 0;text-align:center;color:#2f7f63}
 .metric-note{font-size:10px;color:#f2c14e;margin-top:5px}
+.account-info{font-size:11px;color:#3d9c7b;margin-top:6px}
 .heats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:auto}
 .heat{border:1px solid #164536;padding:8px 10px}
 .heat-title{font-size:9px;color:#2f7f63;letter-spacing:.14em;margin-bottom:5px}
@@ -388,6 +396,7 @@ body{background:#0a0c0f}
 .mst{color:#f2c14e;font-weight:700}
 .mrs{width:52px;text-align:right;color:#69737f;font-size:10px;flex:none;
  font-variant-numeric:tabular-nums}
+.account-info{font-size:10px;color:#8b95a1;margin:0 0 7px 0}
 .mfoot{color:#5b646e;font-size:10px;border-top:1px solid #1b212a;padding-top:6px}
 """
 
@@ -465,17 +474,17 @@ def _board(snap, css, theme):
         "<span class='stamp'>%s · %s 전</span></div>"
         "<div class='banner'><i style='background:%s'></i>%s</div>"
         "<div class='cards'>%s</div>"
-        "<div class='foot'>Claude Code 전체 · Fable · Codex 주간 사용률만 표시 · "
-        "금액/토큰 환산 없음 · 조회 실패는 -- 로 표시</div>"
+        "<div class='foot'>계정 사용률 · Enterprise 월간 금액 · Codex 리셋권 · "
+        "* 직전 실측값 유지 · 미제공 값은 --</div>"
         % (esc(snap["generated_stamp"]), esc(fmt_age(snap["generated_at_ms"])),
            colour, esc(banner.get("text")), cards))
-    return _shell("q_console / %s" % theme, css, body, 960, 260)
+    return _shell("q_console / %s" % theme, css, body, 1080, 280)
 
 
 # The mini strip is 400 px wide: every row has to name itself in ~7 characters,
 # so provider and window collapse to codes rather than wrapping onto two lines.
 MINI_TAG = {"claude-code": "Claude", "fable": "Fable", "codex": "Codex"}
-MINI_KEY = {"week": ""}
+MINI_KEY = {"week": "", "month": "월간"}
 
 
 def _mini(snap):
@@ -496,18 +505,24 @@ def _mini(snap):
             fill = ("<i class='unk' style='width:100%'></i>" if used is None else
                     "<i style='width:%.1f%%;background:%s'></i>" % (max(0.0, used), tone))
             tag = "%s %s" % (code, MINI_KEY.get(limit.get("key"), limit.get("key") or ""))
-            reset = ("롤링" if limit.get("reset_in") is None
-                     else limit.get("reset_text"))
+            reset = limit.get("reset_text") or "--"
             # The mini strip has no room for the "마지막 실측" badge the cards
             # carry, so a carried value says so with the same * the summaries
             # use rather than passing itself off as a fresh read.
             mark = "<span class='mst'>*</span>" if limit.get("stale") else ""
+            display = (limit.get("primary_text") if limit.get("account_spend") and used is None
+                       else pct_text(used))
             rows.append(
                 "<div class='mrow'><span class='mtag'>%s</span>"
                 "<div class='mbar'>%s</div>"
                 "<span class='mval' style='color:%s'>%s%s</span>"
                 "<span class='mrs'>%s</span></div>"
-                % (esc(tag), fill, tone, pct_text(used), mark, esc(reset)))
+                % (esc(tag), fill, tone, esc(display), mark, esc(reset)))
+            if limit.get("account_spend"):
+                rows.append("<div class='account-info'>%s / %s</div>" % (
+                    esc(limit.get("primary_text")), esc(limit.get("budget_text"))))
+        if provider.get("reset_credits") is not None:
+            rows.append("<div class='account-info'>%s</div>" % esc(reset_credit_text(provider["reset_credits"])))
     banner = snap["gui_model"]["banner"]
     body = (
         "<div class='mtop'><b>q_console</b><span>%s · %s 전</span></div>%s"
@@ -625,16 +640,25 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
         tone = TONE.get(limit.get("bar_tone"), TONE["unknown"])
         value = pct_text(limit.get("used"))
         reset = limit.get("reset_text") or "--"
+        if limit.get("account_spend"):
+            label = "Enterprise" if provider.get("plan") == "enterprise" else label
+            reset = "%s / %s" % (limit.get("primary_text") or "--", limit.get("budget_text") or "--")
+            if limit.get("used") is None:
+                value = limit.get("primary_text") or "--"
         # A carried value keeps its tone colour (the level is still true) but
         # is dimmed and starred, so the strip never passes it off as fresh.
         stale = limit.get("stale")
         mark = "<span class='st' title='%s'>*</span>" % esc(provider.get("note")) if stale else ""
+        detail = ""
+        if provider.get("reset_credits") is not None:
+            detail = "<span class='r'>%s</span>" % esc(reset_credit_text(provider["reset_credits"]))
         html_value = ("<span class='k'>%s</span>"
                       "<span class='v%s' style='color:%s'>%s</span>%s"
                       "<span class='r'>(%s)</span>"
                       % (esc(label), " stale" if stale else "", tone,
-                         esc(value), mark, esc(reset)))
-        return html_value, value + ("*" if stale else ""), reset
+                         esc(value), mark, esc(reset))) + detail
+        extra_width = 6 * len(reset_credit_text(provider["reset_credits"])) + 10 if detail else 0
+        return html_value, value + ("*" if stale else ""), reset, label, extra_width
 
     segments = []
     width = 24
@@ -646,10 +670,10 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
         for provider_id, label in providers:
             if provider_id not in selected:
                 continue
-            markup, value, reset = metric(provider_id, label)
+            markup, value, reset, label, extra_width = metric(provider_id, label)
             metrics.append(markup)
             # Include flex gaps and the optional stale marker, not just glyphs.
-            width += len(value) * 7 + 6 * (len(label) + len(reset)) + 24
+            width += len(value) * 7 + 6 * (len(label) + len(reset)) + 24 + extra_width
         if metrics:
             segments.append("<div class='seg'>%s%s</div>" % (icon, "".join(metrics)))
             width += 19
@@ -673,4 +697,4 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
         stamp = clock = ""
     return _shell("q_console overlay", OVERLAY_CSS,
                   body + stamp + "<script>%s%s</script>" % (OVERLAY_DRAG_SCRIPT, clock),
-                  max(80, min(700, width)), 32)
+                  max(80, min(1000, width)), 32)

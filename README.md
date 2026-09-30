@@ -10,15 +10,18 @@ A tiny Windows tray/overlay app that shows the **weekly account usage** of Claud
 
 ![오버레이](docs/overlay.png)
 
-표시하는 것은 세 가지뿐입니다:
+계정에 따라 다음 항목을 표시함:
 
 | 항목 | 출처 |
 |---|---|
 | Claude Code | Claude Usage의 All models 주간 사용률 |
+| Claude Enterprise | 사용량 기반 Enterprise 계정의 월간 실측 금액, 실제 한도, 사용률 |
 | Fable | Claude Usage의 Fable 전용 주간 사용률 |
-| Codex | ChatGPT Usage의 Weekly usage limit |
+| Codex | ChatGPT Usage의 Weekly usage limit, 보유 리셋권, 현재 사용 가능한 리셋권 |
 
-금액, 공개 단가 환산, 로컬 토큰 합계, 5시간 창은 표시하지 않습니다.
+주간 사용률을 표시하는 구독 계정은 공개 단가 환산, 로컬 토큰 합계, 5시간 창을 표시하지 않음.
+단, 사용량 기반 Claude Enterprise는 계정 Usage가 반환한 월간 금액과 실제 한도를 표시함.
+Enterprise에서 한도를 제공하지 않으면 금액만 표시하며, 별도 Fable 사용률이 없으면 `--`로 표시함.
 (구독 없이 **API 키**로 쓰는 경우에는 표시할 플랜 한도가 없으므로, 대신 이번 달 사용량을
 직접 정한 예산과 비교해 보여줍니다. → [API 키 모드](#api-키-모드))
 
@@ -61,7 +64,9 @@ q_console.cmd --print    텍스트 사용률 출력
 세 값 모두 로컬 로그 추정치가 아니라, 설치된 클라이언트가 사용하는 **읽기 전용 계정 Usage 응답값**입니다.
 
 - **Claude / Fable**: `~/.claude/.credentials.json`의 현재 Claude Code 로그인을 이용해 Anthropic 계정 Usage를 조회합니다. weekly_all과 Fable weekly_scoped를 각각 별도 퍼센트로 표시합니다.
+- **Claude Enterprise**: Enterprise 로그인을 자동 인식하고, 주간 한도가 없는 사용량 기반 계정은 `spend`의 금액·통화·소수점 단위 또는 기존 `extra_usage` 응답을 읽어 월간 사용량으로 표시함. 공개 API 단가로 환산하거나 로컬 예산을 계정 한도로 대신 표시하지 않음.
 - **Codex**: `~/.codex/auth.json`의 현재 ChatGPT 로그인을 이용해 Codex 계정 Usage의 7일 창을 조회합니다.
+- **Codex 리셋권**: `rate_limit_reset_credits.available_count`는 보유 개수, `applicable_available_count`는 현재 사용 가능한 개수로 구분하여 표시함. 정보만 표시하며 리셋권을 사용하지 않음. 조회 실패·값 미제공은 0개 대신 `--`로 표시함.
 
 q_console은 두 자격 증명 파일을 **읽기만** 합니다. 토큰을 config/cache/html에 저장하지 않고, 자격 증명 갱신도 하지 않습니다. Claude Code 또는 Codex 앱이 로그인을 갱신하면 다음 Refresh가 새 자격 증명을 읽습니다.
 
@@ -105,6 +110,8 @@ q_console.exe --set-usage-mode api_key         자동 감지 대신 강제 (auto
 ## 화면
 
 대시보드에는 Claude Code / Fable / Codex 카드 세 개가 있고, 각 카드에 현재 주간 사용률 %, 리셋까지 남은 시간, 실측 배지가 표시됩니다. 오버레이는 한 줄로 세 사용률과 리셋 잔여 시간을 보여줍니다. (위 스크린샷 참고)
+Enterprise 로그인에서는 Claude 카드가 `Claude Enterprise`로 바뀌며, 월간 실측 금액·한도·사용률이 대시보드, Mini, 오버레이에 표시됨. Codex 리셋권도 세 화면에 함께 표시됨.
+서버가 Enterprise 리셋 시각을 제공하지 않으면 임의의 카운트다운을 만들지 않고 `--`로 표시함. 이전 월의 금액은 새 월에 재사용하지 않음.
 
 테마: `Surfacer` / `HUD (phosphor)` / `Mini`.
 
