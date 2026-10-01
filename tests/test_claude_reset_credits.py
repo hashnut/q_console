@@ -46,10 +46,10 @@ class ClaudeResetCreditTests(unittest.TestCase):
         credits = plan_usage.extract_claude_reset_credits(self.usage)
         self.assertEqual(credits["available_count"], 4)
         self.assertEqual(credits["applicable_available_count"], 1)
-        five_at = plan_usage._iso_epoch("2026-10-05T00:00:00+00:00")
         full_at = plan_usage._iso_epoch("2026-10-22T16:00:00+00:00")
-        self.assertEqual(credits["expires_at"], [five_at, five_at, full_at])
-        self.assertEqual(credits["expiry_labels"], ["5시간 리셋", "5시간 리셋", "전체 리셋"])
+        self.assertEqual(credits["expires_at"], [full_at])
+        self.assertEqual(credits["expiry_labels"], ["전체 리셋"])
+        self.assertEqual(snapshot.reset_credit_text(credits), "리셋권 1개")
 
     def test_unreadable_grants_are_unknown_and_unoffered_accounts_hide_them(self):
         unknown = {"available_count": None, "applicable_available_count": None}
@@ -69,11 +69,12 @@ class ClaudeResetCreditTests(unittest.TestCase):
         expiry = dt.datetime.fromtimestamp(
             plan_usage._iso_epoch("2026-10-22T16:00:00+00:00")).strftime("%m-%d %H:%M")
         self.assertTrue(claude["reset_credit_tip"].startswith("리셋권 만료 · 전체 리셋 %s (" % expiry))
-        self.assertIn("리셋권 1개 · 사용 가능 1개", snap["summary_lines"][0])
+        self.assertIn("리셋권 1개", snap["summary_lines"][0])
         for theme in ("surfacer", "phosphor", "mini"):
             self.assertIn(claude["reset_credit_tip"], render.render(snap, theme))
         overlay = render.render_overlay(snap, {"overlay_items": ["claude-code"]})
-        self.assertIn("리셋권 1개 · 사용 가능 1개", overlay)
+        self.assertIn("리셋권 1개", overlay)
+        self.assertNotIn("사용 가능", overlay)
         self.assertIn(claude["reset_credit_tip"], overlay)
         # The credits close the Claude segment, after its five-hour window.
         self.assertLess(overlay.index("52%"), overlay.index("리셋권 1개"))

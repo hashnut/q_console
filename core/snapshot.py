@@ -13,8 +13,8 @@ Codex reset credits are separate counts, never percentages or spend budgets.
 All three come from the current authenticated account endpoints. Local token
 logs and list-price estimates are deliberately not used as quota values.
 
-When a live read fails - most often because Claude Code's OAuth access token
-expired while the app was closed, which answers HTTP 401 - the previous
+Claude OAuth is renewed before its expiry or once after an HTTP 401. If a
+live read still fails because of authentication or network trouble, the previous
 snapshot's percentage is carried forward and flagged stale rather than shown as
 "--". A carried value is dropped once it can no longer be true: after its own
 weekly window has reset, or after ``stale_max_age_sec``.
@@ -388,9 +388,9 @@ def text_report(providers: list[dict], stamp: _dt.datetime) -> str:
 
 
 def reset_credit_tooltip(credits, now: int) -> str:
-    """Hover text listing when each owned reset credit expires."""
+    """Hover text for reset credits that can be used now."""
     credits = credits or {}
-    if not credits.get("available_count"):
+    if not credits.get("applicable_available_count"):
         return ""
     expiries = credits.get("expires_at")
     if expiries is None:
@@ -411,8 +411,5 @@ def reset_credit_tooltip(credits, now: int) -> str:
 
 def reset_credit_text(credits) -> str:
     credits = credits or {}
-    available = credits.get("available_count")
     applicable = credits.get("applicable_available_count")
-    return "리셋권 %s · 사용 가능 %s" % (
-        "--" if available is None else "%d개" % available,
-        "--" if applicable is None else "%d개" % applicable)
+    return "리셋권 %s" % ("--" if applicable is None else "%d개" % applicable)

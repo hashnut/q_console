@@ -6,7 +6,7 @@ A tiny Windows tray/overlay app showing Claude's **weekly and five-hour session 
 
 ![대시보드 (phosphor 테마)](docs/dashboard-phosphor.png)
 
-오버레이는 화면 구석에 한 줄로 붙어 있습니다. 아래는 표시 확인용 테스트 데이터로 촬영한 예시입니다:
+오버레이는 화면 구석에 한 줄로 붙어 있습니다. 아래는 실제 계정에서 주간·5시간 사용량을 수신한 화면입니다:
 
 ![오버레이](docs/overlay.png)
 
@@ -17,7 +17,7 @@ A tiny Windows tray/overlay app showing Claude's **weekly and five-hour session 
 | Claude Code | Claude Usage의 All models 주간 사용률, 현재 세션(5시간) 사용률 및 각각의 재설정 시간 |
 | Claude Enterprise | 사용량 기반 Enterprise 계정의 월간 실측 금액, 실제 한도, 사용률 |
 | Fable | Claude Usage의 Fable 전용 주간 사용률 |
-| Codex | ChatGPT Usage의 Weekly usage limit, 보유 리셋권, 현재 사용 가능한 리셋권 |
+| Codex | ChatGPT Usage의 Weekly usage limit, 현재 사용 가능한 리셋권 |
 
 구독 계정의 사용률은 계정 Usage 응답에서 읽습니다. Claude의 현재 세션은 5시간 창이며 주간 한도와 별도로 재설정됩니다.
 단, 사용량 기반 Claude Enterprise는 계정 Usage가 반환한 월간 금액과 실제 한도를 표시함.
@@ -66,17 +66,16 @@ q_console.bat --print    텍스트 사용률 출력
 - **Claude / Fable**: `~/.claude/.credentials.json`의 현재 Claude Code 로그인을 이용해 Anthropic 계정 Usage를 조회합니다. weekly_all, 현재 세션 session(기존 응답의 five_hour), Fable weekly_scoped를 각각 별도 퍼센트로 표시합니다. 현재 세션이 0%여도 표시하며, 조회 실패로 값이 없으면 `5h --`로 남겨 두고 툴팁에서 실패 이유를 보여줍니다.
 - **Claude Enterprise**: Enterprise 로그인을 자동 인식하고, 주간 한도가 없는 사용량 기반 계정은 `spend`의 금액·통화·소수점 단위 또는 기존 `extra_usage` 응답을 읽어 월간 사용량으로 표시함. 공개 API 단가로 환산하거나 로컬 예산을 계정 한도로 대신 표시하지 않음.
 - **Codex**: `~/.codex/auth.json`의 현재 ChatGPT 로그인을 이용해 Codex 계정 Usage의 7일 창을 조회합니다.
-- **Codex 리셋권**: `rate_limit_reset_credits.available_count`는 보유 개수, `applicable_available_count`는 현재 사용 가능한 개수로 구분하여 표시함. 정보만 표시하며 리셋권을 사용하지 않음. 조회 실패·값 미제공은 0개 대신 `--`로 표시함.
+- **Codex 리셋권**: `rate_limit_reset_credits.applicable_available_count`의 현재 사용 가능한 개수만 `리셋권 2개`처럼 표시함. 조회 실패·값 미제공은 0개 대신 `--`로 표시함. 리셋권을 사용하지 않음.
 - **Codex 리셋권 만료**: 리셋권이 1개 이상이면 조회 전용 `wham/rate-limit-reset-credits`에서 리셋권별 `expires_at`을 읽어, 리셋권 문구에 마우스를 올리면 만료 시각과 남은 기간을 툴팁으로 보여줌. `/consume`은 호출하지 않음.
-- **Claude 리셋권**: Claude Code의 `/limit-reset`과 같은 `api/oauth/usage?cedar_ember=1` 응답의 `grants`를 읽어, `resets_left` 합계를 보유 개수로, 그중 `usable_now`인 것을 사용 가능 개수로 표시함. 툴팁에는 전체 리셋/5시간 리셋 구분과 `ends_at` 만료 시각을 보여줌. 사용량과 같은 요청 하나로 읽으므로 조회 횟수는 늘지 않음. 서버가 Claude Code 클라이언트에만 리셋권을 알려 주므로 설치된 Claude Code 버전으로 `claude-cli/<버전> (external, cli)` User-Agent를 보냄(config의 `claude_cli_version`으로 지정 가능). 리셋권을 사용하지 않으며, 리셋권 대상이 아닌 계정은 줄을 숨기고 조회 실패는 `--`로 표시함.
+- **Claude 리셋권**: Claude Code의 `/limit-reset`과 같은 `api/oauth/usage?cedar_ember=1` 응답의 `grants`에서 `usable_now`가 참이고 일시 중지되지 않은 리셋권의 `resets_left`만 합산해 `리셋권 1개`처럼 표시함. 툴팁에도 사용할 수 있는 리셋권의 전체/5시간 구분과 만료 시각만 보여줌. 사용량과 같은 요청 하나로 읽으므로 조회 횟수는 늘지 않음. 서버가 Claude Code 클라이언트에만 리셋권을 알려 주므로 설치된 Claude Code 버전으로 `claude-cli/<버전> (external, cli)` User-Agent를 보냄(config의 `claude_cli_version`으로 지정 가능). 리셋권을 사용하지 않으며, 리셋권 대상이 아닌 계정은 줄을 숨기고 조회 실패는 `--`로 표시함.
 
-q_console은 두 자격 증명 파일을 **읽기만** 합니다. 토큰을 config/cache/html에 저장하지 않고, 자격 증명 갱신도 하지 않습니다. Claude Code 또는 Codex 앱이 로그인을 갱신하면 다음 Refresh가 새 자격 증명을 읽습니다.
+토큰은 config/cache/html에 저장하지 않습니다. Claude 액세스 토큰이 만료됐거나 만료까지 1분 이내이면 기존 refresh token으로 자동 갱신하고, Claude Code의 자격 증명 파일에만 원자적으로 저장합니다. 기존 로그인 범위와 다른 필드를 유지하며, 조회 중 Claude Code가 로그인이나 계정을 바꿨으면 그 변경을 보존합니다. 만료 시각과 관계없이 HTTP 401이 발생한 경우에도 한 번 갱신 후 재조회합니다. Codex 자격 증명 파일은 읽기만 합니다.
 
-조회에 실패하면(가장 흔한 원인은 Claude Code를 오래 안 켜 둬서 OAuth 액세스 토큰이
-만료된 상태 - 서버가 HTTP 401을 돌려줍니다) **직전 실측값을 유지**하고 `*`와 흐린 색으로
+자동 로그인 갱신 후에도 조회에 실패하면 **직전 실측값을 유지**하고 `*`와 흐린 색으로
 표시합니다. 값이 더 이상 참일 수 없게 되면 - 그 주간 창이 이미 리셋됐거나 24시간
-(`stale_max_age_sec`)이 지나면 - 유지하지 않고 `--`로 돌아갑니다. Claude Code를 다시 열면
-토큰이 갱신되어 다음 갱신부터 정상값으로 돌아옵니다. 0%는 서버가 실제로 0을 반환했을
+(`stale_max_age_sec`)이 지나면 - 유지하지 않고 `--`로 돌아갑니다. 만료된 Claude 토큰은
+사용량 조회의 요청 제한 대기보다 먼저 갱신합니다. 사용량 서버가 만료 토큰에 HTTP 401 대신 429를 반환하는 경우도 처리합니다. 0%는 서버가 실제로 0을 반환했을
 때만 표시합니다.
 
 ## API 키 모드
@@ -120,8 +119,7 @@ Enterprise 로그인에서는 Claude 카드가 `Claude Enterprise`로 바뀌며,
 ## 문제 해결
 
 - **값이 `--`**: 해당 앱에서 로그아웃됐거나 네트워크 조회 실패. 앱 로그인 후 Refresh.
-- **값에 `*`가 붙음**: 이번 조회가 실패해 직전 실측값을 유지 중입니다. Claude Code를 한 번
-  열면 토큰이 갱신되고 다음 갱신에서 사라집니다.
+- **값에 `*`가 붙음**: 이번 조회가 실패해 직전 실측값을 유지 중입니다. Claude 토큰은 자동 갱신합니다. 갱신도 실패하면 Claude Code에서 다시 로그인한 뒤 Refresh합니다.
 - **주간 값은 있는데 `5h --`**: 이전 캐시에 주간 값만 있고 현재 조회가 실패한 상태일 수 있습니다. `5h`에 마우스를 올려 원인을 확인합니다. 요청 제한이면 `조회 대기`를 표시하며 자동 재조회까지 기다립니다. 5시간 값은 해당 세션 재설정 이후에는 이전 값을 유지하지 않습니다.
 - **창이 안 뜨고 텍스트 창만**: WebView2 런타임 자동 설치가 실패한 경우입니다.
   `q_console.exe --install-webview2`로 재시도하거나

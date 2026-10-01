@@ -22,8 +22,8 @@ OVERLAY_PATH = os.path.join(APP_HOME, "overlay.html")
 SCAN_PATH = os.path.join(APP_HOME, "scan-cache.json")
 
 DEFAULTS = {
-    # Read-only credentials owned and refreshed by the installed clients.
-    # q_console never writes these files or copies their tokens into its cache.
+    # Credentials stay in the clients' own files, never in the usage cache.
+    # Expired Claude OAuth credentials are refreshed and atomically renewed.
     "claude_credentials_file": "~/.claude/.credentials.json",
     "codex_auth_file": "~/.codex/auth.json",
     "claude_settings_file": "~/.claude/settings.json",

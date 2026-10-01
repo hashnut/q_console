@@ -1,9 +1,9 @@
 """Read current plan percentages from the signed-in desktop tools.
 
 These are account-level values, not estimates reconstructed from local token
-logs. Credentials are read from the files owned by Claude Code and Codex for
-each refresh, used only as Authorization headers, and never copied into the
-q_console cache.
+logs. Credentials are read from the clients' own files and never copied into
+the q_console cache. Expired Claude OAuth credentials are renewed through the
+client's token endpoint and saved atomically in the same credential file.
 
 If an endpoint or credential is unavailable, the caller gets ``None`` rather
 than a stale local-log percentage.
@@ -12,6 +12,7 @@ than a stale local-log percentage.
 from __future__ import annotations
 
 import datetime as _dt
+from contextlib import contextmanager
 import email.utils
 import glob
 import hashlib
@@ -25,6 +26,8 @@ import urllib.request
 from . import config
 
 CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+CLAUDE_TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
+CLAUDE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 # The same Usage read with Claude's limit-reset grants attached (what
 # Claude Code's /limit-reset shows). It is read-only; redeeming a reset is a
 # separate call q_console never makes. The server only attaches grants for the
@@ -73,6 +76,16 @@ def _load_json(path: str) -> dict:
 
 def _get_json(url: str, headers: dict) -> dict:
     request = urllib.request.Request(url, headers=headers, method="GET")
+    return _request_json(request)
+
+
+def _post_json(url: str, headers: dict, payload: dict) -> dict:
+    request = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
+                                     headers=headers, method="POST")
+    return _request_json(request)
+
+
+def _request_json(request) -> dict:
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_SEC) as response:
             value = json.load(response)
@@ -87,6 +100,86 @@ def _get_json(url: str, headers: dict) -> dict:
     if not isinstance(value, dict):
         raise RuntimeError("unexpected response")
     return value
+
+
+@contextmanager
+def _credential_lock(path: str):
+    """Use a sidecar lock to serialize q_console's refresh workers."""
+    handle = open(path + ".q_console-refresh.lock", "a+b")
+    acquired = False
+    deadline = time.monotonic() + TIMEOUT_SEC
+    try:
+        while not acquired:
+            handle.seek(0)
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("Claude login refresh busy") from None
+                time.sleep(0.05)
+        yield
+    finally:
+        if acquired:
+            handle.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+        handle.close()
+
+
+def _refresh_claude_credentials(path: str, credentials: dict, now: int, version: str) -> dict:
+    with _credential_lock(path):
+        latest = _load_json(path)
+        before, current = credentials.get("claudeAiOauth") or {}, latest.get("claudeAiOauth") or {}
+        if any(before.get(key) != current.get(key) for key in ("accessToken", "refreshToken")):
+            return latest
+        return _renew_claude_credentials(path, latest, now, version)
+
+
+def _renew_claude_credentials(path: str, credentials: dict, now: int, version: str) -> dict:
+    """Renew the existing grant without changing its scopes or other fields."""
+    oauth = credentials.get("claudeAiOauth") or {}
+    refresh_token = oauth.get("refreshToken")
+    if not refresh_token:
+        raise RuntimeError("Claude login expired; refresh token not found")
+    payload = {"grant_type": "refresh_token", "refresh_token": refresh_token,
+               "client_id": CLAUDE_CLIENT_ID}
+    if oauth.get("scopes"):
+        payload["scope"] = " ".join(oauth["scopes"])
+    data = _post_json(CLAUDE_TOKEN_URL, {
+        "Content-Type": "application/json", "Accept": "application/json",
+        "User-Agent": "claude-cli/%s (external, cli)" % version,
+    }, payload)
+    access_token = data.get("access_token")
+    expires_in = _count(data.get("expires_in"))
+    if not isinstance(access_token, str) or not access_token or not expires_in:
+        raise RuntimeError("invalid Claude token refresh response")
+    # A native client may have refreshed or switched accounts while the request
+    # was running. Keep its result and all unrelated credential-file fields.
+    latest = _load_json(path)
+    current = latest.get("claudeAiOauth") or {}
+    if any(current.get(key) != oauth.get(key) for key in ("accessToken", "refreshToken")):
+        return latest
+    renewed = dict(current, accessToken=access_token, expiresAt=(now + expires_in) * 1000)
+    if data.get("refresh_token"):
+        if not isinstance(data["refresh_token"], str):
+            raise RuntimeError("invalid Claude token refresh response")
+        renewed["refreshToken"] = data["refresh_token"]
+    if isinstance(data.get("scope"), str):
+        renewed["scopes"] = data["scope"].split()
+    refresh_expires_in = _count(data.get("refresh_token_expires_in"))
+    if refresh_expires_in is not None:
+        renewed["refreshTokenExpiresAt"] = (now + refresh_expires_in) * 1000
+    latest["claudeAiOauth"] = renewed
+    config.write_atomic(path, json.dumps(latest, ensure_ascii=False, indent=2))
+    return latest
 
 
 def _iso_epoch(value) -> int | None:
@@ -242,10 +335,11 @@ def extract_claude_reset_credits(data: dict) -> dict | None:
         if not left:
             continue
         available += left
-        if grant.get("usable_now") is True and grant.get("paused") is not True:
+        usable = grant.get("usable_now") is True and grant.get("paused") is not True
+        if usable:
             applicable += left
         ends_at = _iso_epoch(grant.get("ends_at"))
-        if ends_at is not None:
+        if usable and ends_at is not None:
             expiries += [(ends_at, _claude_reset_kind(grant.get("clears")))] * left
     expiries.sort(key=lambda row: row[0])
     return {
@@ -289,6 +383,8 @@ def collect_claude(cfg: dict, retry=None, now: int | None = None) -> dict:
     retry = retry if isinstance(retry, dict) else {}
     next_retry = None
     scope = None
+    in_refresh = False
+    refreshed = False
     try:
         credentials = _load_json(path)
         oauth = credentials.get("claudeAiOauth") or {}
@@ -296,6 +392,24 @@ def collect_claude(cfg: dict, retry=None, now: int | None = None) -> dict:
         token = oauth.get("accessToken")
         if not token:
             raise RuntimeError("Claude login not found")
+        version = _claude_cli_version(cfg)
+        scope = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        if retry.get("auth_scope") != scope:
+            retry = {}
+        if retry.get("phase") == "refresh" and (retry.get("after") or 0) > now:
+            next_retry = retry
+            raise RuntimeError("HTTP 429")
+        expiry = _count(oauth.get("expiresAt"))
+        # Refresh BEFORE applying a cached Usage 429. An invalid bearer can be
+        # rate-limited by Usage before it reports 401, hiding its expiration.
+        if expiry is not None and expiry <= (now + 60) * 1000:
+            in_refresh = True
+            credentials = _refresh_claude_credentials(path, credentials, now, version)
+            in_refresh, refreshed = False, True
+            oauth = credentials.get("claudeAiOauth") or {}
+            plan, token = oauth.get("subscriptionType"), oauth.get("accessToken")
+            if not token:
+                raise RuntimeError("Claude login not found")
         # Workers are new processes each minute. Persist only a one-way token
         # fingerprint and retry timing in the snapshot, never the credential.
         scope = hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -307,12 +421,28 @@ def collect_claude(cfg: dict, retry=None, now: int | None = None) -> dict:
         # One request carries both the limits and the reset grants: the Usage
         # endpoint rate-limits quickly, so a second read per refresh would put
         # the percentages themselves at risk.
-        data = _get_json(CLAUDE_USAGE_WITH_RESETS_URL, {
+        headers = {
             "Authorization": "Bearer %s" % token,
             "anthropic-beta": "oauth-2025-04-20",
             "Accept": "application/json",
-            "User-Agent": "claude-cli/%s (external, cli)" % _claude_cli_version(cfg),
-        })
+            "User-Agent": "claude-cli/%s (external, cli)" % version,
+        }
+        try:
+            data = _get_json(CLAUDE_USAGE_WITH_RESETS_URL, headers)
+        except RuntimeError as exc:
+            if str(exc) != "HTTP 401" or refreshed or not oauth.get("refreshToken"):
+                raise
+            in_refresh = True
+            credentials = _refresh_claude_credentials(path, credentials, now, version)
+            in_refresh = False
+            oauth = credentials.get("claudeAiOauth") or {}
+            plan, token = oauth.get("subscriptionType"), oauth.get("accessToken")
+            if not token:
+                raise RuntimeError("Claude login not found")
+            scope = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            retry = {}
+            headers["Authorization"] = "Bearer %s" % token
+            data = _get_json(CLAUDE_USAGE_WITH_RESETS_URL, headers)
         limits = extract_claude(data, plan)
         return {"status": "ok", "note": "Claude 계정 Usage 실측", **limits,
                 "reset_credits": extract_claude_reset_credits(data)}
@@ -324,6 +454,8 @@ def collect_claude(cfg: dict, retry=None, now: int | None = None) -> dict:
                 delay = min(CLAUDE_RETRY_MAX_SEC, CLAUDE_RETRY_BASE_SEC * 2 ** (failures - 1))
                 delay = max(delay, getattr(exc, "retry_after", None) or 0)
                 next_retry = {"after": now + delay, "failures": failures, "auth_scope": scope}
+                if in_refresh:
+                    next_retry["phase"] = "refresh"
             note += " · 요청 제한, %s 재조회" % _dt.datetime.fromtimestamp(next_retry["after"]).strftime("%H:%M")
         if str(exc) == "HTTP 401":
             note += " · Claude Code에서 /usage 실행 후 Refresh"
