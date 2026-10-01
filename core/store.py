@@ -1,7 +1,7 @@
 """Incremental scan cache.
 
-A full pass over 443 Codex rollouts costs ~10 s. The tray refreshes every 30
-minutes and on every click, so re-parsing everything each time would burn CPU
+A full pass over 443 Codex rollouts costs ~10 s. The tray refreshes every
+minute and on every click, so re-parsing everything each time would burn CPU
 for data that cannot have changed: a session file that is closed never changes
 again. We key each file's parsed result on (size, mtime) and only re-read the
 ones whose signature moved.

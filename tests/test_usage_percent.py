@@ -226,6 +226,80 @@ class StaleCarryForwardTests(unittest.TestCase):
         self.assertIn("--", snap["detail_text"])
 
 
+class ClaudeSessionWindowTests(unittest.TestCase):
+    """Claude has two clocks: the five-hour session and the weekly window.
+    Both must be visible, each with its own reset countdown."""
+
+    def setUp(self):
+        self.now = int(dt.datetime(2026, 10, 1, 15, 0).timestamp())
+        self.data = {"limits": [
+            {"kind": "session", "percent": 26,
+             "resets_at": dt.datetime.fromtimestamp(self.now + 2 * 3600 + 20 * 60,
+                                                    dt.timezone.utc).isoformat()},
+            {"kind": "weekly_all", "percent": 14,
+             "resets_at": dt.datetime.fromtimestamp(self.now + 21 * 3600,
+                                                    dt.timezone.utc).isoformat()},
+            {"kind": "weekly_scoped", "percent": 0,
+             "resets_at": dt.datetime.fromtimestamp(self.now + 21 * 3600,
+                                                    dt.timezone.utc).isoformat(),
+             "scope": {"model": {"display_name": "Fable"}}},
+        ]}
+        self.codex = {"status": "ok", "weekly": {"used": 9.0, "resets_at": self.now + 86400},
+                      "plan": "pro"}
+
+    def _build(self, data, previous=None, at=None, status="ok"):
+        claude = {"status": status, "note": "fixture",
+                  **plan_usage.extract_claude(data, "max")}
+        with patch("core.snapshot.now_ms", return_value=(at or self.now) * 1000), \
+             patch("core.snapshot._read_current", return_value=(claude, self.codex)):
+            return snapshot.build({"warning_used_percent": 80}, previous=previous)
+
+    def test_session_is_extracted_from_limits_and_legacy_five_hour(self):
+        self.assertEqual(plan_usage.extract_claude(self.data)["session"]["used"], 26.0)
+        legacy = plan_usage.extract_claude({"five_hour": {
+            "utilization": 41.0, "resets_at": "2026-10-01T11:19:59+00:00"}})
+        self.assertEqual(legacy["session"]["used"], 41.0)
+        self.assertIsNone(plan_usage.extract_claude({})["session"]["used"])
+
+    def test_every_view_shows_both_claude_windows_with_their_own_resets(self):
+        snap = self._build(self.data)
+        limits = snap["providers"][0]["limits"]
+        self.assertEqual([l["key"] for l in limits], ["week", "session"])
+        self.assertEqual([l["reset_text"] for l in limits], ["21h 0m", "2h 20m"])
+        self.assertIn("Claude Code 14% / 5h 26%", snap["summary_lines"][0])
+        self.assertIn("2h 20m", snap["detail_text"])
+        self.assertEqual(snap["poll_interval_sec"], 60)
+        overlay = render.render_overlay(snap)
+        self.assertIn(">5h</span>", overlay)
+        self.assertIn(">26%</span>", overlay)
+        self.assertIn("(2h 20m)", overlay)
+        self.assertIn("(21h 0m)", overlay)
+        for theme in ("surfacer", "phosphor", "mini"):
+            html = render.render(snap, theme)
+            self.assertIn("26%", html)
+            self.assertIn("2h 20m", html)
+            self.assertIn("21h 0m", html)
+
+    def test_hiding_claude_hides_its_session_window(self):
+        html = render.render_overlay(self._build(self.data), {"overlay_items": ["codex"]})
+        self.assertNotIn(">5h</span>", html)
+
+    def test_failed_read_carries_session_until_its_own_reset(self):
+        good = self._build(self.data)
+        failed = self._build({}, previous=good, at=self.now + 600, status="unavailable")
+        session = failed["providers"][0]["limits"][1]
+        self.assertEqual(session["used"], 26.0)
+        self.assertTrue(session["stale"])
+        # Past the session reset but inside the week: only the weekly value survives.
+        later = self._build({}, previous=good, at=self.now + 3 * 3600, status="unavailable")
+        self.assertEqual([l["key"] for l in later["providers"][0]["limits"]], ["week"])
+        self.assertEqual(later["providers"][0]["limits"][0]["used"], 14.0)
+
+    def test_a_full_session_drives_the_warning_even_with_low_weekly(self):
+        self.data["limits"][0]["percent"] = 97
+        self.assertEqual(self._build(self.data)["hover_mode"], "blocked")
+
+
 class ApiKeyModeTests(unittest.TestCase):
     """Someone on an API key has no plan percentage - the gauge is this
     month's spend against a budget they set."""

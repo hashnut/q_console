@@ -495,7 +495,9 @@ def _board(snap, css, theme):
 # The mini strip is 400 px wide: every row has to name itself in ~7 characters,
 # so provider and window collapse to codes rather than wrapping onto two lines.
 MINI_TAG = {"claude-code": "Claude", "fable": "Fable", "codex": "Codex"}
-MINI_KEY = {"week": "", "month": "월간"}
+MINI_KEY = {"week": "", "month": "월간", "session": "5h"}
+# Overlay labels for a provider's secondary windows (Claude's 5-hour session).
+OVERLAY_KEY = {"session": "5h"}
 
 
 def _mini(snap):
@@ -669,6 +671,23 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
                       % (esc(label), " stale" if stale else "", tone,
                          esc(value), mark, esc(reset))) + detail
         extra_width = 6 * len(reset_credit_text(provider["reset_credits"])) + 10 if detail else 0
+        # Claude's five-hour session window rides on the same segment, with its
+        # own reset countdown next to the weekly one.
+        for extra in limits[1:]:
+            extra_value = pct_text(extra.get("used"))
+            extra_reset = extra.get("reset_text") or "--"
+            extra_label = OVERLAY_KEY.get(extra.get("key"), extra.get("label") or "")
+            extra_stale = extra.get("stale")
+            extra_mark = ("<span class='st' title='%s'>*</span>" % esc(provider.get("note"))
+                          if extra_stale else "")
+            html_value += ("<span class='k'>%s</span>"
+                           "<span class='v%s' style='color:%s'>%s</span>%s"
+                           "<span class='r'>(%s)</span>"
+                           % (esc(extra_label), " stale" if extra_stale else "",
+                              TONE.get(extra.get("bar_tone"), TONE["unknown"]),
+                              esc(extra_value), extra_mark, esc(extra_reset)))
+            extra_width += (len(extra_value) * 7 + 6 * (len(extra_label) + len(extra_reset))
+                            + 24)
         return html_value, value + ("*" if stale else ""), reset, label, extra_width
 
     segments = []
@@ -690,8 +709,8 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
             width += 19
     width += 20 * max(0, len(segments) - 1)
     body = "<div class='div'></div>".join(segments)
-    # Live wall clock, not the refresh stamp: the strip is only re-rendered every
-    # poll (30 min), so a static stamp reads as a clock that has stopped. Ticks
+    # Live wall clock, not the refresh stamp: the strip is only re-rendered on
+    # each poll, so a static stamp reads as a clock that has stopped. Ticks
     # on the minute boundary so it never lags a real clock by more than a beat.
     stamp = ("<span class='age' id='clk' title='마지막 갱신 %s'>%s</span>"
              % (esc(snap.get("generated_stamp", "")),

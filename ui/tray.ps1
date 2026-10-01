@@ -29,7 +29,9 @@ $ErrorActionPreference = 'Stop'
 # would spawn a grandchild and let the parent mistake the tray for dead (F3).
 
 $CachePath = Join-Path $AppHome 'usage-cache.json'
-$PollMs = 30 * 60 * 1000
+# One minute: the account Usage endpoints are cheap reads, and a slower poll
+# left Claude's five-hour session number visibly behind the real one.
+$PollMs = 60 * 1000
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -134,7 +136,7 @@ function Request-Refresh {
     [void](Start-Worker -Arguments @('--refresh') -Kind 'refresh' -OnDone {
         Update-Display
         # Refill an already-open window IN PLACE. Never Show-Detail here: that
-        # raises and activates, so the 30-minute poll popped the window over
+        # raises and activates, so the periodic poll popped the window over
         # whatever the user was doing (D-64). A background refresh may update
         # what a window shows; it may never decide to show one.
         if (Test-DetailOpen) { [void](Update-DetailContent) }
@@ -278,7 +280,7 @@ $script:ICON_TONE_LIGHT = @{
 }
 
 # The shell repaints the tray on theme switch but never tells us, so read the
-# same key Explorer reads. Cheap enough to call per repaint (every 30 min).
+# same key Explorer reads. Cheap enough to call per repaint (every minute).
 function Test-LightTaskbar {
     try {
         $v = Get-ItemPropertyValue -ErrorAction Stop `
@@ -428,7 +430,7 @@ function New-GaugeIcon {
     return $ico
 }
 
-# Win32 DestroyIcon so repainting the gauge every 30 min does not leak handles.
+# Win32 DestroyIcon so repainting the gauge every minute does not leak handles.
 Add-Type -Namespace UV -Name Native -MemberDefinition @'
 [System.Runtime.InteropServices.DllImport("user32.dll", CharSet=System.Runtime.InteropServices.CharSet.Auto)]
 public static extern bool DestroyIcon(System.IntPtr handle);
@@ -466,7 +468,7 @@ $icon.Text = 'q_console'
 #
 # Update-DetailContent REFILLS the window and nothing else. It never shows,
 # raises, activates or un-minimizes anything, so a background refresh can keep an
-# open window current without stealing focus (D-64: the 30-minute poll used to
+# open window current without stealing focus (D-64: the periodic poll used to
 # yank the window over whatever the user was doing).
 # Show-Detail = refill + bring on screen. ONLY user gestures may call it.
 function Update-DetailContent {
@@ -788,7 +790,7 @@ $timer.Interval = $PollMs
 $timer.add_Tick({ Update-Display -Refresh })
 $timer.Start()
 
-# Display recovery is independent of the 30-minute network refresh. Windows
+# Display recovery is independent of the 1-minute network refresh. Windows
 # can minimize/hide the tool window, cover it with another topmost window, or
 # move it off-screen during display changes. Recover without taking focus.
 $overlayTimer = New-Object System.Windows.Forms.Timer

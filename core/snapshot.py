@@ -3,6 +3,7 @@
 Three providers are exposed:
 
 * Claude Code weekly usage (all models)
+* Claude Code current session (five-hour) usage, as a second Claude row
 * Fable weekly scoped usage
 * Codex weekly usage
 
@@ -31,6 +32,9 @@ from .util import clamp_pct, fmt_dur, fmt_tokens, fmt_usd, now_ms, tone_for
 # A carried-forward percentage stops standing in for a live read after this
 # long, even if its weekly window has not reset yet.
 STALE_MAX_AGE_SEC = 24 * 3600
+
+# Short names for secondary windows in one-line summaries.
+SUMMARY_KEY = {"session": "5h"}
 
 
 def _limit(key: str, label: str, value: dict, now: int, warn: int,
@@ -120,6 +124,12 @@ def _prior_limits(previous) -> dict:
         limits = provider.get("limits") or []
         if limits and isinstance(limits[0], dict):
             prior[provider.get("id")] = dict(limits[0], provider_plan=provider.get("plan"))
+        # Secondary windows (Claude's five-hour session) are keyed by window so
+        # each one carries forward against its own reset time.
+        for limit in limits[1:]:
+            if isinstance(limit, dict) and limit.get("key"):
+                prior["%s/%s" % (provider.get("id"), limit["key"])] = dict(
+                    limit, provider_plan=provider.get("plan"))
     return prior
 
 
@@ -185,6 +195,16 @@ def _provider(provider_id: str, label: str, raw: dict, limit: dict,
     }
 
 
+def _session_limit(raw: dict, prior, now: int, warn: int, max_age: int):
+    """Claude's five-hour session window, or None when the account has none."""
+    value = raw.get("session") or {}
+    limit = _limit("session", value.get("window_label") or "현재 세션",
+                   value, now, warn, measured_at=now)
+    limit = _carry_forward(limit, prior, now, warn, max_age,
+                           api_mode=raw.get("mode") == "api_key")
+    return limit if limit["used"] is not None else None
+
+
 def _read_claude(cfg: dict, now: int) -> dict:
     """Subscription percentage when signed in; month-to-date spend on a key.
 
@@ -224,15 +244,24 @@ def _pct_text(limit: dict) -> str:
 
 
 def _verdict(providers: list[dict]) -> tuple[str, str]:
-    values = [("%s %s" % (p["label"], _pct_text(p["limits"][0])))
-              for p in providers]
-    known = [p["limits"][0].get("used") for p in providers
-             if p["limits"][0].get("used") is not None]
+    values = [_provider_summary(p) for p in providers]
+    # Any window can be the one that blocks work: a full five-hour session
+    # stops Claude even while the weekly bar is low.
+    known = [limit.get("used") for p in providers for limit in p["limits"]
+             if limit.get("used") is not None]
     if not known:
         return "계정 사용률을 불러오지 못했습니다", "degraded"
     maximum = max(known)
     mode = "blocked" if maximum >= 95 else "warning" if maximum >= 80 else "relaxed"
     return "계정 사용률 · " + " · ".join(values), mode
+
+
+def _provider_summary(provider: dict) -> str:
+    text = "%s %s" % (provider["label"], _pct_text(provider["limits"][0]))
+    for limit in provider["limits"][1:]:
+        text += " / %s %s" % (SUMMARY_KEY.get(limit["key"], limit["label"]),
+                              _pct_text(limit))
+    return text
 
 
 def build(cfg: dict, previous=None) -> dict:
@@ -260,6 +289,13 @@ def build(cfg: dict, previous=None) -> dict:
         limit = _carry_forward(limit, previous_limit, now, warn,
                                max_age, api_mode=raw.get("mode") == "api_key")
         provider = _provider(provider_id, label, raw, limit, plan)
+        if provider_id == "claude-code" and not limit.get("account_spend"):
+            session_prior = prior.get("claude-code/session")
+            if plan is not None and session_prior and session_prior.get("provider_plan") != plan:
+                session_prior = None
+            session = _session_limit(raw, session_prior, now, warn, max_age)
+            if session:
+                provider["limits"].append(session)
         if provider_id == "codex":
             provider["reset_credits"] = raw.get("reset_credits") or {
                 "available_count": None, "applicable_available_count": None}
@@ -268,13 +304,12 @@ def build(cfg: dict, previous=None) -> dict:
     verdict, mode = _verdict(providers)
     stamp = _dt.datetime.fromtimestamp(now)
 
-    summary = [("%s %s" % (p["label"], _pct_text(p["limits"][0])))
-               for p in providers]
+    summary = [_provider_summary(p) for p in providers]
     summary[-1] += " · " + reset_credit_text(providers[-1].get("reset_credits"))
 
     return {
         "generated_at_ms": now * 1000,
-        "poll_interval_sec": 1800,
+        "poll_interval_sec": 60,
         "quota_axis_scope": "authenticated account usage",
         "pattern_axis_scope": None,
         "config_status": "ok",
@@ -316,6 +351,11 @@ def text_report(providers: list[dict], stamp: _dt.datetime) -> str:
             provider["label"], used, limit["reset_text"],
             ("  (%s / %s)" % (limit["primary_text"], limit["budget_text"]))
             if limit.get("unit") else ""))
+        for extra in provider["limits"][1:]:
+            extra_used = ("--" if extra["used"] is None else "%.1f%%%s" % (
+                extra["used"], "*" if extra.get("stale") else ""))
+            lines.append("  %-10s %6s  reset %s" % (
+                extra["label"], extra_used, extra["reset_text"]))
         if provider["status"] != "ok":
             lines.append("  %s" % provider["note"])
         if provider.get("reset_credits") is not None:

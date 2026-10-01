@@ -116,6 +116,16 @@ def _claude_limit(data: dict, kind: str, model_name: str | None = None) -> dict:
 
 def extract_claude(data: dict, plan: str | None = None) -> dict:
     all_models = _claude_limit(data, "weekly_all")
+    # The current session (five-hour) window resets on its own clock, separate
+    # from the weekly one. Both are shown, each with its own reset time.
+    session = _claude_limit(data, "session")
+    if session["used"] is None:
+        legacy = data.get("five_hour") or {}
+        session = {
+            "used": _number(legacy.get("utilization")),
+            "resets_at": _iso_epoch(legacy.get("resets_at")),
+        }
+    session.update(window_key="session", window_label="현재 세션")
     fable = _claude_limit(data, "weekly_scoped", "Fable")
 
     # Compatibility with older Claude Code responses that predate limits[].
@@ -158,7 +168,7 @@ def extract_claude(data: dict, plan: str | None = None) -> dict:
                 "amount": amount, "budget": budget, "account_spend": True,
                 "window_key": "month", "window_label": "월간 사용량",
             }
-    return {"all_models": all_models, "fable": fable, "plan": plan}
+    return {"all_models": all_models, "session": session, "fable": fable, "plan": plan}
 
 
 def collect_claude(cfg: dict) -> dict:
