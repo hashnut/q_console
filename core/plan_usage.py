@@ -12,14 +12,26 @@ than a stale local-log percentage.
 from __future__ import annotations
 
 import datetime as _dt
+import glob
 import json
 import math
+import os
 import urllib.error
 import urllib.request
 
 from . import config
 
 CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+# The same Usage read with Claude's limit-reset grants attached (what
+# Claude Code's /limit-reset shows). It is read-only; redeeming a reset is a
+# separate call q_console never makes. The server only attaches grants for the
+# Claude Code surface, identified by its "claude-cli/<version> (external, cli)"
+# User-Agent, and refuses versions that are too old.
+CLAUDE_USAGE_WITH_RESETS_URL = CLAUDE_USAGE_URL + "?cedar_ember=1"
+CLAUDE_CLI_FALLBACK_VERSION = "2.1.286"
+# Ineligibility caused by how q_console identified itself, not by the account:
+# the count is unknown, so it shows "--" instead of disappearing.
+CLAUDE_RESET_CLIENT_REASONS = {"surface", "cli_version", "unknown"}
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 # Read-only list of individual reset credits. Its sibling ".../consume" redeems
 # a credit; q_console never calls it.
@@ -171,6 +183,76 @@ def extract_claude(data: dict, plan: str | None = None) -> dict:
     return {"all_models": all_models, "session": session, "fable": fable, "plan": plan}
 
 
+def _claude_reset_kind(clears) -> str | None:
+    clears = set(clears) if isinstance(clears, list) else set()
+    if "seven_day" in clears:
+        return "전체 리셋"
+    if clears == {"five_hour"}:
+        return "5시간 리셋"
+    return None
+
+
+def extract_claude_reset_credits(data: dict) -> dict | None:
+    """Claude limit-reset grants as reset-credit counts.
+
+    Returns None when the account is not offered resets at all (nothing to
+    show), and unknown counts when the grants could not be read.
+    """
+    unknown = {"available_count": None, "applicable_available_count": None}
+    state = data.get("cedar_ember")
+    if not isinstance(state, dict) or not isinstance(state.get("eligible"), bool):
+        return unknown
+    if not state["eligible"]:
+        reason = state.get("ineligible_reason")
+        return unknown if reason in CLAUDE_RESET_CLIENT_REASONS else None
+    available = applicable = 0
+    expiries = []
+    for grant in state.get("grants") or []:
+        if not isinstance(grant, dict):
+            continue
+        left = _count(grant.get("resets_left"))
+        if not left:
+            continue
+        available += left
+        if grant.get("usable_now") is True and grant.get("paused") is not True:
+            applicable += left
+        ends_at = _iso_epoch(grant.get("ends_at"))
+        if ends_at is not None:
+            expiries += [(ends_at, _claude_reset_kind(grant.get("clears")))] * left
+    expiries.sort(key=lambda row: row[0])
+    return {
+        "available_count": available,
+        "applicable_available_count": applicable,
+        "expires_at": [at for at, _ in expiries],
+        "expiry_labels": [kind for _, kind in expiries],
+    }
+
+
+def _claude_cli_version(cfg: dict) -> str:
+    """Installed Claude Code version, which the reset grants are gated on."""
+    configured = str(cfg.get("claude_cli_version") or "").strip()
+    if configured:
+        return configured
+    candidates = []
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        try:
+            package = _load_json(os.path.join(
+                appdata, "npm", "node_modules", "@anthropic-ai", "claude-code", "package.json"))
+            candidates.append(str(package.get("version") or ""))
+        except (OSError, ValueError):
+            pass
+    candidates += [os.path.basename(path) for path in glob.glob(
+        os.path.join(os.path.expanduser("~/.local/share/claude/versions"), "*"))]
+    versions = []
+    for text in candidates:
+        try:
+            versions.append((tuple(int(part) for part in text.split(".")), text))
+        except ValueError:
+            continue
+    return max(versions)[1] if versions else CLAUDE_CLI_FALLBACK_VERSION
+
+
 def collect_claude(cfg: dict) -> dict:
     path = config.expand(cfg.get("claude_credentials_file") or
                          "~/.claude/.credentials.json")
@@ -182,14 +264,18 @@ def collect_claude(cfg: dict) -> dict:
         token = oauth.get("accessToken")
         if not token:
             raise RuntimeError("Claude login not found")
-        data = _get_json(CLAUDE_USAGE_URL, {
+        # One request carries both the limits and the reset grants: the Usage
+        # endpoint rate-limits quickly, so a second read per refresh would put
+        # the percentages themselves at risk.
+        data = _get_json(CLAUDE_USAGE_WITH_RESETS_URL, {
             "Authorization": "Bearer %s" % token,
             "anthropic-beta": "oauth-2025-04-20",
             "Accept": "application/json",
-            "User-Agent": "q_console/1.0 (Claude Code usage)",
+            "User-Agent": "claude-cli/%s (external, cli)" % _claude_cli_version(cfg),
         })
         limits = extract_claude(data, plan)
-        return {"status": "ok", "note": "Claude 계정 Usage 실측", **limits}
+        return {"status": "ok", "note": "Claude 계정 Usage 실측", **limits,
+                "reset_credits": extract_claude_reset_credits(data)}
     except (OSError, ValueError, RuntimeError) as exc:
         note = "Claude 사용률 확인 실패: %s" % exc
         if str(exc) == "HTTP 401":
@@ -198,6 +284,8 @@ def collect_claude(cfg: dict) -> dict:
             "status": "unavailable",
             "note": note,
             **extract_claude({}, plan),
+            "reset_credits": None if plan == "enterprise" else {
+                "available_count": None, "applicable_available_count": None},
         }
 
 

@@ -669,7 +669,7 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
                       "<span class='v%s' style='color:%s'>%s</span>%s"
                       "<span class='r'>(%s)</span>"
                       % (esc(label), " stale" if stale else "", tone,
-                         esc(value), mark, esc(reset))) + detail
+                         esc(value), mark, esc(reset)))
         extra_width = 6 * len(reset_credit_text(provider["reset_credits"])) + 10 if detail else 0
         # Claude's five-hour session window rides on the same segment, with its
         # own reset countdown next to the weekly one.
@@ -688,6 +688,8 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
                               esc(extra_value), extra_mark, esc(extra_reset)))
             extra_width += (len(extra_value) * 7 + 6 * (len(extra_label) + len(extra_reset))
                             + 24)
+        # Reset credits close the provider's segment, after every window.
+        html_value += detail
         return html_value, value + ("*" if stale else ""), reset, label, extra_width
 
     segments = []

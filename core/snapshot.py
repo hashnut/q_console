@@ -299,13 +299,18 @@ def build(cfg: dict, previous=None) -> dict:
         if provider_id == "codex":
             provider["reset_credits"] = raw.get("reset_credits") or {
                 "available_count": None, "applicable_available_count": None}
+        elif provider_id == "claude-code" and raw.get("reset_credits") is not None:
+            # Absent in API-key mode and for accounts that are not offered resets.
+            provider["reset_credits"] = raw["reset_credits"]
+        if provider.get("reset_credits") is not None:
             provider["reset_credit_tip"] = reset_credit_tooltip(provider["reset_credits"], now)
         providers.append(provider)
     verdict, mode = _verdict(providers)
     stamp = _dt.datetime.fromtimestamp(now)
 
-    summary = [_provider_summary(p) for p in providers]
-    summary[-1] += " · " + reset_credit_text(providers[-1].get("reset_credits"))
+    summary = [_provider_summary(p) + (" · " + reset_credit_text(p["reset_credits"])
+                                       if p.get("reset_credits") is not None else "")
+               for p in providers]
 
     return {
         "generated_at_ms": now * 1000,
@@ -383,9 +388,15 @@ def reset_credit_tooltip(credits, now: int) -> str:
     expiries = credits.get("expires_at")
     if expiries is None:
         return "리셋권 만료 시각 미확인"
-    rows = ["%s (%s 남음)" % (_dt.datetime.fromtimestamp(at).strftime("%m-%d %H:%M"),
-                             fmt_dur(at - now))
-            for at in expiries if at > now]
+    labels = credits.get("expiry_labels") or []
+    rows = []
+    for index, at in enumerate(expiries):
+        if at <= now:
+            continue
+        label = labels[index] if index < len(labels) and labels[index] else ""
+        rows.append("%s%s (%s 남음)" % (
+            label + " " if label else "",
+            _dt.datetime.fromtimestamp(at).strftime("%m-%d %H:%M"), fmt_dur(at - now)))
     if not rows:
         return "리셋권 만료 시각 미제공"
     return "리셋권 만료 · " + ", ".join(rows)
