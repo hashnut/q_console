@@ -12,10 +12,13 @@ than a stale local-log percentage.
 from __future__ import annotations
 
 import datetime as _dt
+import email.utils
 import glob
+import hashlib
 import json
 import math
 import os
+import time
 import urllib.error
 import urllib.request
 
@@ -37,6 +40,27 @@ CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 # a credit; q_console never calls it.
 CODEX_RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
 TIMEOUT_SEC = 8
+CLAUDE_RETRY_BASE_SEC = 300
+CLAUDE_RETRY_MAX_SEC = 1800
+
+
+class UsageHTTPError(RuntimeError):
+    def __init__(self, status: int, retry_after: int | None = None):
+        super().__init__("HTTP %d" % status)
+        self.retry_after = retry_after
+
+
+def _retry_after(value) -> int | None:
+    if not value:
+        return None
+    try:
+        seconds = float(value)
+        return max(0, math.ceil(seconds)) if math.isfinite(seconds) else None
+    except (TypeError, ValueError, OverflowError):
+        try:
+            return max(0, math.ceil(email.utils.parsedate_to_datetime(value).timestamp() - time.time()))
+        except (TypeError, ValueError, OverflowError):
+            return None
 
 
 def _load_json(path: str) -> dict:
@@ -55,7 +79,9 @@ def _get_json(url: str, headers: dict) -> dict:
     except urllib.error.HTTPError as exc:
         # Do not include the response body: auth failures can contain account
         # details, and q_console only needs a short status message.
-        raise RuntimeError("HTTP %d" % exc.code) from None
+        retry_after = _retry_after((exc.headers or {}).get("Retry-After"))
+        exc.close()
+        raise UsageHTTPError(exc.code, retry_after) from None
     except urllib.error.URLError:
         raise RuntimeError("network unavailable") from None
     if not isinstance(value, dict):
@@ -131,6 +157,8 @@ def extract_claude(data: dict, plan: str | None = None) -> dict:
     # The current session (five-hour) window resets on its own clock, separate
     # from the weekly one. Both are shown, each with its own reset time.
     session = _claude_limit(data, "session")
+    if session["used"] is None:
+        session = _claude_limit(data, "five_hour")
     if session["used"] is None:
         legacy = data.get("five_hour") or {}
         session = {
@@ -253,10 +281,14 @@ def _claude_cli_version(cfg: dict) -> str:
     return max(versions)[1] if versions else CLAUDE_CLI_FALLBACK_VERSION
 
 
-def collect_claude(cfg: dict) -> dict:
+def collect_claude(cfg: dict, retry=None, now: int | None = None) -> dict:
     path = config.expand(cfg.get("claude_credentials_file") or
                          "~/.claude/.credentials.json")
     plan = None
+    now = int(time.time()) if now is None else now
+    retry = retry if isinstance(retry, dict) else {}
+    next_retry = None
+    scope = None
     try:
         credentials = _load_json(path)
         oauth = credentials.get("claudeAiOauth") or {}
@@ -264,6 +296,14 @@ def collect_claude(cfg: dict) -> dict:
         token = oauth.get("accessToken")
         if not token:
             raise RuntimeError("Claude login not found")
+        # Workers are new processes each minute. Persist only a one-way token
+        # fingerprint and retry timing in the snapshot, never the credential.
+        scope = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        if retry.get("auth_scope") != scope:
+            retry = {}
+        if (retry.get("after") or 0) > now:
+            next_retry = retry
+            raise RuntimeError("HTTP 429")
         # One request carries both the limits and the reset grants: the Usage
         # endpoint rate-limits quickly, so a second read per refresh would put
         # the percentages themselves at risk.
@@ -278,11 +318,19 @@ def collect_claude(cfg: dict) -> dict:
                 "reset_credits": extract_claude_reset_credits(data)}
     except (OSError, ValueError, RuntimeError) as exc:
         note = "Claude 사용률 확인 실패: %s" % exc
+        if str(exc) == "HTTP 429":
+            if next_retry is None:
+                failures = min(8, int(retry.get("failures") or 0) + 1)
+                delay = min(CLAUDE_RETRY_MAX_SEC, CLAUDE_RETRY_BASE_SEC * 2 ** (failures - 1))
+                delay = max(delay, getattr(exc, "retry_after", None) or 0)
+                next_retry = {"after": now + delay, "failures": failures, "auth_scope": scope}
+            note += " · 요청 제한, %s 재조회" % _dt.datetime.fromtimestamp(next_retry["after"]).strftime("%H:%M")
         if str(exc) == "HTTP 401":
             note += " · Claude Code에서 /usage 실행 후 Refresh"
         return {
             "status": "unavailable",
             "note": note,
+            "usage_retry": next_retry,
             **extract_claude({}, plan),
             "reset_credits": None if plan == "enterprise" else {
                 "available_count": None, "applicable_available_count": None},

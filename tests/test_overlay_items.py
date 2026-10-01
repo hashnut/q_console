@@ -12,7 +12,7 @@ from core import __main__ as app
 
 class OverlayItemsTests(unittest.TestCase):
     def test_all_item_combinations(self):
-        labels = {"claude-code": "Claude", "fable": "Fable", "codex": "Codex"}
+        labels = {"claude-code": "Claude 주간", "fable": "Fable", "codex": "Codex"}
         for count in range(1, 5):
             for selected in itertools.combinations(config.DEFAULTS["overlay_items"], count):
                 with self.subTest(selected=selected):

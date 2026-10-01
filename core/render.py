@@ -658,6 +658,8 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
             reset = "%s / %s" % (limit.get("primary_text") or "--", limit.get("budget_text") or "--")
             if limit.get("used") is None:
                 value = limit.get("primary_text") or "--"
+        elif provider_id == "claude-code" and not limit.get("unit"):
+            label += " 주간"
         # A carried value keeps its tone colour (the level is still true) but
         # is dimmed and starred, so the strip never passes it off as fresh.
         stale = limit.get("stale")
@@ -665,10 +667,11 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
         detail = ""
         if provider.get("reset_credits") is not None:
             detail = reset_credit_html(provider, "span", "r")
-        html_value = ("<span class='k'>%s</span>"
+        tip = "%s · %s" % (limit.get("label") or label, provider.get("note") or "계정 Usage 실측")
+        html_value = ("<span class='k' title='%s'>%s</span>"
                       "<span class='v%s' style='color:%s'>%s</span>%s"
                       "<span class='r'>(%s)</span>"
-                      % (esc(label), " stale" if stale else "", tone,
+                      % (esc(tip), esc(label), " stale" if stale else "", tone,
                          esc(value), mark, esc(reset)))
         extra_width = 6 * len(reset_credit_text(provider["reset_credits"])) + 10 if detail else 0
         # Claude's five-hour session window rides on the same segment, with its
@@ -676,14 +679,18 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
         for extra in limits[1:]:
             extra_value = pct_text(extra.get("used"))
             extra_reset = extra.get("reset_text") or "--"
+            if extra.get("used") is None and provider.get("usage_retry"):
+                extra_reset = "조회 대기"
             extra_label = OVERLAY_KEY.get(extra.get("key"), extra.get("label") or "")
             extra_stale = extra.get("stale")
             extra_mark = ("<span class='st' title='%s'>*</span>" % esc(provider.get("note"))
                           if extra_stale else "")
-            html_value += ("<span class='k'>%s</span>"
+            extra_tip = "%s · %s" % (extra.get("label") or extra_label,
+                                      provider.get("note") or "계정 Usage 실측")
+            html_value += ("<span class='k' title='%s'>%s</span>"
                            "<span class='v%s' style='color:%s'>%s</span>%s"
                            "<span class='r'>(%s)</span>"
-                           % (esc(extra_label), " stale" if extra_stale else "",
+                           % (esc(extra_tip), esc(extra_label), " stale" if extra_stale else "",
                               TONE.get(extra.get("bar_tone"), TONE["unknown"]),
                               esc(extra_value), extra_mark, esc(extra_reset)))
             extra_width += (len(extra_value) * 7 + 6 * (len(extra_label) + len(extra_reset))
@@ -693,7 +700,8 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
         return html_value, value + ("*" if stale else ""), reset, label, extra_width
 
     segments = []
-    width = 24
+    # Include room for font/DPI rounding and Korean labels in narrow selections.
+    width = 40
     for icon, providers in (
         (ICON_CLAUDE, (("claude-code", "Claude"), ("fable", "Fable"))),
         (ICON_CODEX, (("codex", "Codex"),)),

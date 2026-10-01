@@ -13,7 +13,7 @@ class OverlayLifecycleTests(unittest.TestCase):
             result = subprocess.run(
                 ["powershell.exe", "-STA", "-NoProfile", "-ExecutionPolicy",
                  "Bypass", "-File", str(script), "-AppHome", home],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True, text=True, errors="replace", timeout=30,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

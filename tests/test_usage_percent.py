@@ -121,7 +121,7 @@ class UsagePresentationTests(unittest.TestCase):
         snap = snapshot.build({"warning_used_percent": 80})
         html = render.render_overlay(snap)
 
-        self.assertIn(">Claude</span>", html)
+        self.assertIn(">Claude 주간</span>", html)
         self.assertIn(">Fable</span>", html)
         self.assertIn(">Codex</span>", html)
         self.assertIn(">3.0%</span>", html)
@@ -134,7 +134,7 @@ class UsagePresentationTests(unittest.TestCase):
         self.assertIn("postMessage('q_console:drag-move')", html)
         self.assertIn("cursor:move", html)
         self.assertNotIn("$", html)
-        self.assertNotIn("5h", html)
+        self.assertIn(">5h</span>", html)
 
 
 class StaleCarryForwardTests(unittest.TestCase):
@@ -180,7 +180,8 @@ class StaleCarryForwardTests(unittest.TestCase):
         html = render.render_overlay(snap)
         self.assertIn(">16%</span>", html)
         self.assertIn("class='st'", html)
-        self.assertNotIn(">--</span>", html)
+        # The old snapshot has only weekly data; the missing session stays visible.
+        self.assertEqual(html.count(">--</span>"), 1)
 
     def test_recovered_read_replaces_the_carried_value(self):
         stale = self._build(self.failed_claude,
@@ -292,7 +293,8 @@ class ClaudeSessionWindowTests(unittest.TestCase):
         self.assertTrue(session["stale"])
         # Past the session reset but inside the week: only the weekly value survives.
         later = self._build({}, previous=good, at=self.now + 3 * 3600, status="unavailable")
-        self.assertEqual([l["key"] for l in later["providers"][0]["limits"]], ["week"])
+        self.assertEqual([l["key"] for l in later["providers"][0]["limits"]], ["week", "session"])
+        self.assertIsNone(later["providers"][0]["limits"][1]["used"])
         self.assertEqual(later["providers"][0]["limits"][0]["used"], 14.0)
 
     def test_a_full_session_drives_the_warning_even_with_low_weekly(self):

@@ -196,16 +196,18 @@ def _provider(provider_id: str, label: str, raw: dict, limit: dict,
 
 
 def _session_limit(raw: dict, prior, now: int, warn: int, max_age: int):
-    """Claude's five-hour session window, or None when the account has none."""
+    """Keep the subscription session visible even when its value is unknown."""
+    if raw.get("mode") == "api_key":
+        return None
     value = raw.get("session") or {}
     limit = _limit("session", value.get("window_label") or "현재 세션",
                    value, now, warn, measured_at=now)
     limit = _carry_forward(limit, prior, now, warn, max_age,
                            api_mode=raw.get("mode") == "api_key")
-    return limit if limit["used"] is not None else None
+    return limit
 
 
-def _read_claude(cfg: dict, now: int) -> dict:
+def _read_claude(cfg: dict, now: int, retry=None) -> dict:
     """Subscription percentage when signed in; month-to-date spend on a key.
 
     A live subscription always wins - its number is a real plan limit, and the
@@ -214,7 +216,7 @@ def _read_claude(cfg: dict, now: int) -> dict:
     mode = api_key_usage.claude_auth_mode(cfg)
     if mode["mode"] == "api_key":
         return api_key_usage.collect_claude_api(cfg, now, mode)
-    result = plan_usage.collect_claude(cfg)
+    result = plan_usage.collect_claude(cfg, retry=retry, now=now)
     if mode["mode"] == "none" and result.get("status") != "ok":
         result = dict(result, note="Claude 로그인/API 키 없음")
     return result
@@ -226,11 +228,14 @@ def _read_codex(cfg: dict, now: int) -> dict:
     return plan_usage.collect_codex(cfg)
 
 
-def _read_current(cfg: dict, now: int) -> tuple[dict, dict]:
+def _read_current(cfg: dict, now: int, previous=None) -> tuple[dict, dict]:
     # Both calls are independent and timeout-bounded. Running them together
     # prevents a disconnected network from making refresh wait twice.
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        claude_future = pool.submit(_read_claude, cfg, now)
+        previous = previous if isinstance(previous, dict) else {}
+        previous_claude = next((p for p in previous.get("providers", [])
+                                if p.get("id") == "claude-code"), {})
+        claude_future = pool.submit(_read_claude, cfg, now, previous_claude.get("usage_retry"))
         codex_future = pool.submit(_read_codex, cfg, now)
         return claude_future.result(), codex_future.result()
 
@@ -270,7 +275,7 @@ def build(cfg: dict, previous=None) -> dict:
     now = int(now_ms() / 1000)
     warn = int(cfg.get("warning_used_percent") or 80)
     max_age = int(cfg.get("stale_max_age_sec") or STALE_MAX_AGE_SEC)
-    claude, codex = _read_current(cfg, now)
+    claude, codex = _read_current(cfg, now, previous)
     prior = _prior_limits(previous)
     specs = [
         ("claude-code", "Claude Enterprise" if claude.get("plan") == "enterprise" else "Claude Code",
@@ -289,7 +294,9 @@ def build(cfg: dict, previous=None) -> dict:
         limit = _carry_forward(limit, previous_limit, now, warn,
                                max_age, api_mode=raw.get("mode") == "api_key")
         provider = _provider(provider_id, label, raw, limit, plan)
-        if provider_id == "claude-code" and not limit.get("account_spend"):
+        if provider_id == "claude-code" and raw.get("usage_retry"):
+            provider["usage_retry"] = raw["usage_retry"]
+        if provider_id == "claude-code" and not limit.get("unit"):
             session_prior = prior.get("claude-code/session")
             if plan is not None and session_prior and session_prior.get("provider_plan") != plan:
                 session_prior = None

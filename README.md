@@ -1,12 +1,12 @@
 # q_console
 
-Windows 트레이/오버레이로 **Claude Code · Fable · Codex 계정의 주간 사용률**을 보여주는 작은 도구입니다.
+Windows 트레이/오버레이로 **Claude의 주간·5시간 사용률과 Fable / Codex의 주간 사용률**을 보여주는 작은 도구입니다.
 
-A tiny Windows tray/overlay app that shows the **weekly account usage** of Claude Code, Fable, and Codex.
+A tiny Windows tray/overlay app showing Claude's **weekly and five-hour session usage**, plus Fable and Codex weekly usage.
 
 ![대시보드 (phosphor 테마)](docs/dashboard-phosphor.png)
 
-오버레이는 화면 구석에 한 줄로 붙어 있습니다:
+오버레이는 화면 구석에 한 줄로 붙어 있습니다. 아래는 표시 확인용 테스트 데이터로 촬영한 예시입니다:
 
 ![오버레이](docs/overlay.png)
 
@@ -14,12 +14,12 @@ A tiny Windows tray/overlay app that shows the **weekly account usage** of Claud
 
 | 항목 | 출처 |
 |---|---|
-| Claude Code | Claude Usage의 All models 주간 사용률 |
+| Claude Code | Claude Usage의 All models 주간 사용률, 현재 세션(5시간) 사용률 및 각각의 재설정 시간 |
 | Claude Enterprise | 사용량 기반 Enterprise 계정의 월간 실측 금액, 실제 한도, 사용률 |
 | Fable | Claude Usage의 Fable 전용 주간 사용률 |
 | Codex | ChatGPT Usage의 Weekly usage limit, 보유 리셋권, 현재 사용 가능한 리셋권 |
 
-주간 사용률을 표시하는 구독 계정은 공개 단가 환산, 로컬 토큰 합계, 5시간 창을 표시하지 않음.
+구독 계정의 사용률은 계정 Usage 응답에서 읽습니다. Claude의 현재 세션은 5시간 창이며 주간 한도와 별도로 재설정됩니다.
 단, 사용량 기반 Claude Enterprise는 계정 Usage가 반환한 월간 금액과 실제 한도를 표시함.
 Enterprise에서 한도를 제공하지 않으면 금액만 표시하며, 별도 Fable 사용률이 없으면 `--`로 표시함.
 (구독 없이 **API 키**로 쓰는 경우에는 표시할 플랜 한도가 없으므로, 대신 이번 달 사용량을
@@ -47,13 +47,13 @@ q_console.exe --install-webview2     WebView2 런타임 설치 재시도 (보통
 ### 소스 실행 (Python 3.10+)
 
 ```
-q_console.cmd            트레이만 (콘솔 창 없음)
-q_console.cmd --open     트레이 + 대시보드
-q_console.cmd --print    텍스트 사용률 출력
+q_console.bat            트레이만 (콘솔 창 없음)
+q_console.bat --open     트레이 + 대시보드
+q_console.bat --print    텍스트 사용률 출력
 ```
 
 트레이 아이콘 **좌클릭 = 대시보드**, **우클릭 = Refresh / Theme / Overlay / Always on Top / Exit**.
-1분마다 자동 갱신하며 Refresh를 누르면 즉시 다시 조회합니다. 첫 실행 기본값은 Overlay ON입니다.
+1분마다 자동 갱신하며 Refresh를 누르면 다시 조회합니다. Claude가 요청 제한(HTTP 429)을 반환하면 서버의 `Retry-After` 동안 대기합니다. 별도 안내가 없으면 5분부터 최대 30분까지 재시도 간격을 늘립니다. 대기 중에도 Codex와 화면은 갱신됩니다. 첫 실행 기본값은 Overlay ON입니다.
 트레이 우클릭 → **Overlay 표시 항목**에서 Claude / Fable / Codex / 시계를 각각 켜고 끌 수 있습니다.
 선택은 재시작 후에도 유지되며, 표시하는 항목에 맞춰 오버레이 폭이 줄어듭니다. 최소 한 항목은 켜 두어야 합니다.
 오버레이는 항상 위에 표시되며, 다른 최상위 창에 가려지거나 최소화·숨김 상태가 되면 1초 주기로 자동 복구합니다.
@@ -63,7 +63,7 @@ q_console.cmd --print    텍스트 사용률 출력
 
 세 값 모두 로컬 로그 추정치가 아니라, 설치된 클라이언트가 사용하는 **읽기 전용 계정 Usage 응답값**입니다.
 
-- **Claude / Fable**: `~/.claude/.credentials.json`의 현재 Claude Code 로그인을 이용해 Anthropic 계정 Usage를 조회합니다. weekly_all과 Fable weekly_scoped를 각각 별도 퍼센트로 표시합니다.
+- **Claude / Fable**: `~/.claude/.credentials.json`의 현재 Claude Code 로그인을 이용해 Anthropic 계정 Usage를 조회합니다. weekly_all, 현재 세션 session(기존 응답의 five_hour), Fable weekly_scoped를 각각 별도 퍼센트로 표시합니다. 현재 세션이 0%여도 표시하며, 조회 실패로 값이 없으면 `5h --`로 남겨 두고 툴팁에서 실패 이유를 보여줍니다.
 - **Claude Enterprise**: Enterprise 로그인을 자동 인식하고, 주간 한도가 없는 사용량 기반 계정은 `spend`의 금액·통화·소수점 단위 또는 기존 `extra_usage` 응답을 읽어 월간 사용량으로 표시함. 공개 API 단가로 환산하거나 로컬 예산을 계정 한도로 대신 표시하지 않음.
 - **Codex**: `~/.codex/auth.json`의 현재 ChatGPT 로그인을 이용해 Codex 계정 Usage의 7일 창을 조회합니다.
 - **Codex 리셋권**: `rate_limit_reset_credits.available_count`는 보유 개수, `applicable_available_count`는 현재 사용 가능한 개수로 구분하여 표시함. 정보만 표시하며 리셋권을 사용하지 않음. 조회 실패·값 미제공은 0개 대신 `--`로 표시함.
@@ -111,7 +111,7 @@ q_console.exe --set-usage-mode api_key         자동 감지 대신 강제 (auto
 
 ## 화면
 
-대시보드에는 Claude Code / Fable / Codex 카드 세 개가 있고, 각 카드에 현재 주간 사용률 %, 리셋까지 남은 시간, 실측 배지가 표시됩니다. 오버레이는 한 줄로 세 사용률과 리셋 잔여 시간을 보여줍니다. (위 스크린샷 참고)
+대시보드에는 Claude Code / Fable / Codex 카드 세 개가 있고, 각 카드에 주간 사용률 %, 재설정까지 남은 시간, 실측 배지가 표시됩니다. Claude 카드에는 현재 세션(5시간)도 표시됩니다. 오버레이는 `Claude 주간 29% (…) 5h 2.0% (…)`처럼 두 창의 사용률과 각 재설정 잔여 시간을 구분합니다. Claude 표시를 끄면 5시간 항목도 함께 숨깁니다. (위 스크린샷 참고)
 Enterprise 로그인에서는 Claude 카드가 `Claude Enterprise`로 바뀌며, 월간 실측 금액·한도·사용률이 대시보드, Mini, 오버레이에 표시됨. Codex 리셋권도 세 화면에 함께 표시됨.
 서버가 Enterprise 리셋 시각을 제공하지 않으면 임의의 카운트다운을 만들지 않고 `--`로 표시함. 이전 월의 금액은 새 월에 재사용하지 않음.
 
@@ -122,6 +122,7 @@ Enterprise 로그인에서는 Claude 카드가 `Claude Enterprise`로 바뀌며,
 - **값이 `--`**: 해당 앱에서 로그아웃됐거나 네트워크 조회 실패. 앱 로그인 후 Refresh.
 - **값에 `*`가 붙음**: 이번 조회가 실패해 직전 실측값을 유지 중입니다. Claude Code를 한 번
   열면 토큰이 갱신되고 다음 갱신에서 사라집니다.
+- **주간 값은 있는데 `5h --`**: 이전 캐시에 주간 값만 있고 현재 조회가 실패한 상태일 수 있습니다. `5h`에 마우스를 올려 원인을 확인합니다. 요청 제한이면 `조회 대기`를 표시하며 자동 재조회까지 기다립니다. 5시간 값은 해당 세션 재설정 이후에는 이전 값을 유지하지 않습니다.
 - **창이 안 뜨고 텍스트 창만**: WebView2 런타임 자동 설치가 실패한 경우입니다.
   `q_console.exe --install-webview2`로 재시도하거나
   [수동 설치](https://developer.microsoft.com/microsoft-edge/webview2/).
@@ -139,7 +140,7 @@ pyinstaller q_console.spec
 ## 구조
 
 ```
-q_console.cmd           소스 실행 런처
+q_console.bat           소스 실행 런처
 q_console.spec          EXE 빌드 정의 (PyInstaller)
 core/plan_usage.py      Claude/Fable/Codex 현재 계정 Usage 조회 (구독)
 core/api_key_usage.py   API 키 모드: 이번 달 사용량 vs 예산

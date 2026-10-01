@@ -2,10 +2,10 @@
 chcp 65001 >nul
 setlocal
 rem q_console launcher.
-rem   q_console.cmd                      tray only (no console window)
-rem   q_console.cmd --open               tray + dashboard window
-rem   q_console.cmd --print              text report in this console
-rem   q_console.cmd --install-autostart   start with Windows
+rem   q_console.bat                      tray only (no console window)
+rem   q_console.bat --open               tray + dashboard window
+rem   q_console.bat --print              text report in this console
+rem   q_console.bat --install-autostart   start with Windows
 set "HERE=%~dp0"
 set "PY="
 for /f "delims=" %%I in ('where python.exe 2^>nul') do if not defined PY set "PY=%%I"
