@@ -131,6 +131,41 @@ class EnterpriseResetCreditTests(unittest.TestCase):
         snap = self.build(previous=prior)
         self.assertIsNone(snap["providers"][1]["limits"][0]["used"])
 
+    def test_reset_credit_expiries_keep_only_available_credits_soonest_first(self):
+        data = {"credits": [
+            {"status": "available", "expires_at": "2026-10-29T18:53:16.605377Z"},
+            {"status": "redeemed", "expires_at": "2026-10-02T00:00:00Z"},
+            {"status": "available", "expires_at": "2026-10-05T04:00:00Z"},
+            {"status": "available", "expires_at": None},
+            "bad",
+        ]}
+        self.assertEqual(plan_usage.extract_reset_credit_expiries(data), [
+            plan_usage._iso_epoch("2026-10-05T04:00:00Z"),
+            plan_usage._iso_epoch("2026-10-29T18:53:16Z"),
+        ])
+        self.assertEqual(plan_usage.extract_reset_credit_expiries({}), [])
+
+    def test_every_view_shows_reset_credit_expiry_as_tooltip(self):
+        self.codex["reset_credits"]["expires_at"] = [self.now + 2 * 86400 + 3 * 3600]
+        snap = self.build()
+        expiry = dt.datetime.fromtimestamp(self.now + 2 * 86400 + 3 * 3600).strftime("%m-%d %H:%M")
+        tip = "리셋권 만료 · %s (2d 3h 남음)" % expiry
+        self.assertEqual(snap["providers"][-1]["reset_credit_tip"], tip)
+        for theme in ("surfacer", "phosphor", "mini"):
+            self.assertIn("title='%s'" % tip, render.render(snap, theme))
+        self.assertIn("title='%s'" % tip, render.render_overlay(snap))
+        self.assertIn(tip, snap["detail_text"])
+
+    def test_reset_credit_tooltip_states_unknown_or_missing_expiry(self):
+        self.assertEqual(snapshot.reset_credit_tooltip(
+            {"available_count": 1, "expires_at": None}, self.now), "리셋권 만료 시각 미확인")
+        self.assertEqual(snapshot.reset_credit_tooltip(
+            {"available_count": 1, "expires_at": []}, self.now), "리셋권 만료 시각 미제공")
+        self.assertEqual(snapshot.reset_credit_tooltip({"available_count": 0}, self.now), "")
+        self.codex["reset_credits"]["available_count"] = 0
+        html = render.render_overlay(self.build())
+        self.assertNotIn("만료", html)
+
     def test_hiding_codex_hides_its_reset_credits(self):
         html = render.render_overlay(self.build(), {"overlay_items": ["claude-code"]})
         self.assertNotIn("리셋권", html)

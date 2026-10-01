@@ -41,6 +41,14 @@ def esc(text) -> str:
     return html.escape("" if text is None else str(text), quote=True)
 
 
+def reset_credit_html(provider, tag="div", cls="account-info") -> str:
+    """Reset-credit counts, with each credit's expiry as a hover tooltip."""
+    tip = provider.get("reset_credit_tip")
+    title = " title='%s'" % esc(tip) if tip else ""
+    return "<%s class='%s'%s>%s</%s>" % (
+        tag, cls, title, esc(reset_credit_text(provider["reset_credits"])), tag)
+
+
 def pct_text(value) -> str:
     if value is None:
         return "--"
@@ -221,7 +229,7 @@ def provider_card(provider):
         if provider.get("status") != "ok":
             body += "<div class='metric-note'>%s</div>" % esc(provider.get("note"))
         if provider.get("reset_credits") is not None:
-            body += "<div class='account-info'>%s</div>" % esc(reset_credit_text(provider["reset_credits"]))
+            body += reset_credit_html(provider)
     meta = []
     if provider.get("plan"):
         meta.append("plan %s" % provider["plan"])
@@ -301,6 +309,7 @@ body{background:#0a0c0f}
 .empty span{font-size:11px;color:#4e5761}
 .metric-note{font-size:10px;color:#f2c14e;margin-top:5px}
 .account-info{font-size:11px;color:#a8b1bb;margin-top:6px}
+.account-info[title]{cursor:help}
 .heats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:auto}
 .heat{background:#11151a;border:1px solid #1d232b;border-radius:11px;padding:10px 12px 8px}
 .heat-title{font-size:10px;color:#69737f;letter-spacing:.1em;margin-bottom:6px}
@@ -367,6 +376,7 @@ body:after{content:'';position:fixed;inset:0;pointer-events:none;
 .empty{padding:22px 0;text-align:center;color:#2f7f63}
 .metric-note{font-size:10px;color:#f2c14e;margin-top:5px}
 .account-info{font-size:11px;color:#3d9c7b;margin-top:6px}
+.account-info[title]{cursor:help}
 .heats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:auto}
 .heat{border:1px solid #164536;padding:8px 10px}
 .heat-title{font-size:9px;color:#2f7f63;letter-spacing:.14em;margin-bottom:5px}
@@ -397,6 +407,7 @@ body{background:#0a0c0f}
 .mrs{width:52px;text-align:right;color:#69737f;font-size:10px;flex:none;
  font-variant-numeric:tabular-nums}
 .account-info{font-size:10px;color:#8b95a1;margin:0 0 7px 0}
+.account-info[title]{cursor:help}
 .mfoot{color:#5b646e;font-size:10px;border-top:1px solid #1b212a;padding-top:6px}
 """
 
@@ -522,7 +533,7 @@ def _mini(snap):
                 rows.append("<div class='account-info'>%s / %s</div>" % (
                     esc(limit.get("primary_text")), esc(limit.get("budget_text"))))
         if provider.get("reset_credits") is not None:
-            rows.append("<div class='account-info'>%s</div>" % esc(reset_credit_text(provider["reset_credits"])))
+            rows.append(reset_credit_html(provider))
     banner = snap["gui_model"]["banner"]
     body = (
         "<div class='mtop'><b>q_console</b><span>%s · %s 전</span></div>%s"
@@ -651,7 +662,7 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
         mark = "<span class='st' title='%s'>*</span>" % esc(provider.get("note")) if stale else ""
         detail = ""
         if provider.get("reset_credits") is not None:
-            detail = "<span class='r'>%s</span>" % esc(reset_credit_text(provider["reset_credits"]))
+            detail = reset_credit_html(provider, "span", "r")
         html_value = ("<span class='k'>%s</span>"
                       "<span class='v%s' style='color:%s'>%s</span>%s"
                       "<span class='r'>(%s)</span>"

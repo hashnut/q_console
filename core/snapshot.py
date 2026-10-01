@@ -263,6 +263,7 @@ def build(cfg: dict, previous=None) -> dict:
         if provider_id == "codex":
             provider["reset_credits"] = raw.get("reset_credits") or {
                 "available_count": None, "applicable_available_count": None}
+            provider["reset_credit_tip"] = reset_credit_tooltip(provider["reset_credits"], now)
         providers.append(provider)
     verdict, mode = _verdict(providers)
     stamp = _dt.datetime.fromtimestamp(now)
@@ -319,6 +320,8 @@ def text_report(providers: list[dict], stamp: _dt.datetime) -> str:
             lines.append("  %s" % provider["note"])
         if provider.get("reset_credits") is not None:
             lines.append("  " + reset_credit_text(provider["reset_credits"]))
+            if provider.get("reset_credit_tip"):
+                lines.append("  " + provider["reset_credit_tip"])
     lines.append("")
     if any(p["limits"][0].get("unit") and not p["limits"][0].get("account_spend") for p in providers):
         # API-key mode: the percentage is a budget gauge, not a plan limit, and
@@ -330,6 +333,22 @@ def text_report(providers: list[dict], stamp: _dt.datetime) -> str:
     if any(p["limits"][0].get("stale") for p in providers):
         lines.append("* 는 이번 조회 실패로 직전 실측값을 유지한 항목입니다.")
     return "\n".join(lines)
+
+
+def reset_credit_tooltip(credits, now: int) -> str:
+    """Hover text listing when each owned reset credit expires."""
+    credits = credits or {}
+    if not credits.get("available_count"):
+        return ""
+    expiries = credits.get("expires_at")
+    if expiries is None:
+        return "리셋권 만료 시각 미확인"
+    rows = ["%s (%s 남음)" % (_dt.datetime.fromtimestamp(at).strftime("%m-%d %H:%M"),
+                             fmt_dur(at - now))
+            for at in expiries if at > now]
+    if not rows:
+        return "리셋권 만료 시각 미제공"
+    return "리셋권 만료 · " + ", ".join(rows)
 
 
 def reset_credit_text(credits) -> str:

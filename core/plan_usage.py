@@ -21,6 +21,9 @@ from . import config
 
 CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+# Read-only list of individual reset credits. Its sibling ".../consume" redeems
+# a credit; q_console never calls it.
+CODEX_RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
 TIMEOUT_SEC = 8
 
 
@@ -224,6 +227,27 @@ def extract_codex(data: dict) -> dict:
     }
 
 
+def extract_reset_credit_expiries(data: dict) -> list[int]:
+    """Expiry epochs of the credits that can still be used, soonest first."""
+    expiries = []
+    for credit in data.get("credits") or []:
+        if not isinstance(credit, dict) or credit.get("status") != "available":
+            continue
+        expires_at = _iso_epoch(credit.get("expires_at"))
+        if expires_at is not None:
+            expiries.append(expires_at)
+    return sorted(expiries)
+
+
+def _reset_credit_expiries(headers: dict) -> list[int] | None:
+    # A failed detail read only loses the tooltip; the counts still come from
+    # the Usage response.
+    try:
+        return extract_reset_credit_expiries(_get_json(CODEX_RESET_CREDITS_URL, headers))
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+
 def collect_codex(cfg: dict) -> dict:
     path = config.expand(cfg.get("codex_auth_file") or "~/.codex/auth.json")
     try:
@@ -233,13 +257,15 @@ def collect_codex(cfg: dict) -> dict:
         account_id = tokens.get("account_id")
         if not token or not account_id:
             raise RuntimeError("Codex login not found")
-        data = _get_json(CODEX_USAGE_URL, {
+        headers = {
             "Authorization": "Bearer %s" % token,
             "ChatGPT-Account-Id": str(account_id),
             "Accept": "application/json",
             "User-Agent": "q_console/1.0 (Codex usage)",
-        })
-        current = extract_codex(data)
+        }
+        current = extract_codex(_get_json(CODEX_USAGE_URL, headers))
+        if current["reset_credits"]["available_count"]:
+            current["reset_credits"]["expires_at"] = _reset_credit_expiries(headers)
         return {"status": "ok", "note": "Codex 계정 Usage 실측", **current}
     except (OSError, ValueError, RuntimeError) as exc:
         return {

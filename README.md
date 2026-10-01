@@ -67,6 +67,7 @@ q_console.cmd --print    텍스트 사용률 출력
 - **Claude Enterprise**: Enterprise 로그인을 자동 인식하고, 주간 한도가 없는 사용량 기반 계정은 `spend`의 금액·통화·소수점 단위 또는 기존 `extra_usage` 응답을 읽어 월간 사용량으로 표시함. 공개 API 단가로 환산하거나 로컬 예산을 계정 한도로 대신 표시하지 않음.
 - **Codex**: `~/.codex/auth.json`의 현재 ChatGPT 로그인을 이용해 Codex 계정 Usage의 7일 창을 조회합니다.
 - **Codex 리셋권**: `rate_limit_reset_credits.available_count`는 보유 개수, `applicable_available_count`는 현재 사용 가능한 개수로 구분하여 표시함. 정보만 표시하며 리셋권을 사용하지 않음. 조회 실패·값 미제공은 0개 대신 `--`로 표시함.
+- **Codex 리셋권 만료**: 리셋권이 1개 이상이면 조회 전용 `wham/rate-limit-reset-credits`에서 리셋권별 `expires_at`을 읽어, 리셋권 문구에 마우스를 올리면 만료 시각과 남은 기간을 툴팁으로 보여줌. `/consume`은 호출하지 않음.
 
 q_console은 두 자격 증명 파일을 **읽기만** 합니다. 토큰을 config/cache/html에 저장하지 않고, 자격 증명 갱신도 하지 않습니다. Claude Code 또는 Codex 앱이 로그인을 갱신하면 다음 Refresh가 새 자격 증명을 읽습니다.
 
