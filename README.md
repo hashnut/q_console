@@ -17,7 +17,7 @@ A tiny Windows tray/overlay app showing Claude's **weekly and five-hour session 
 | Claude Code | Claude Usage의 All models 주간 사용률, 현재 세션(5시간) 사용률 및 각각의 재설정 시간 |
 | Claude Enterprise | 사용량 기반 Enterprise 계정의 월간 실측 금액, 실제 한도, 사용률 |
 | Fable | Claude Usage의 Fable 전용 주간 사용률 |
-| Codex | ChatGPT Usage의 Weekly usage limit, 현재 사용 가능한 리셋권 |
+| Codex | ChatGPT Usage의 Weekly usage limit, 보유 리셋권 |
 
 구독 계정의 사용률은 계정 Usage 응답에서 읽습니다. Claude의 현재 세션은 5시간 창이며 주간 한도와 별도로 재설정됩니다.
 단, 사용량 기반 Claude Enterprise는 계정 Usage가 반환한 월간 금액과 실제 한도를 표시함.
@@ -66,7 +66,7 @@ q_console.bat --print    텍스트 사용률 출력
 - **Claude / Fable**: `~/.claude/.credentials.json`의 현재 Claude Code 로그인을 이용해 Anthropic 계정 Usage를 조회합니다. weekly_all, 현재 세션 session(기존 응답의 five_hour), Fable weekly_scoped를 각각 별도 퍼센트로 표시합니다. 현재 세션이 0%여도 표시하며, 조회 실패로 값이 없으면 `5h --`로 남겨 두고 툴팁에서 실패 이유를 보여줍니다.
 - **Claude Enterprise**: Enterprise 로그인을 자동 인식하고, 주간 한도가 없는 사용량 기반 계정은 `spend`의 금액·통화·소수점 단위 또는 기존 `extra_usage` 응답을 읽어 월간 사용량으로 표시함. 공개 API 단가로 환산하거나 로컬 예산을 계정 한도로 대신 표시하지 않음.
 - **Codex**: `~/.codex/auth.json`의 현재 ChatGPT 로그인을 이용해 Codex 계정 Usage의 7일 창을 조회합니다.
-- **Codex 리셋권**: `rate_limit_reset_credits.applicable_available_count`의 현재 사용 가능한 개수만 `리셋권 2개`처럼 표시함. 조회 실패·값 미제공은 0개 대신 `--`로 표시함. 리셋권을 사용하지 않음.
+- **Codex 리셋권**: 웹 Usage의 사용 가능 목록과 같은 `rate_limit_reset_credits.available_count`의 보유 개수를 `리셋권 2개`처럼 표시함. 별도 `applicable_available_count`가 0이어도 보유 리셋권은 표시함. 조회 실패·값 미제공은 0개 대신 `--`로 표시함. 리셋권을 사용하지 않음.
 - **Codex 리셋권 만료**: 리셋권이 1개 이상이면 조회 전용 `wham/rate-limit-reset-credits`에서 리셋권별 `expires_at`을 읽어, 리셋권 문구에 마우스를 올리면 만료 시각과 남은 기간을 툴팁으로 보여줌. `/consume`은 호출하지 않음.
 - **Claude 리셋권**: Claude Code의 `/limit-reset`과 같은 `api/oauth/usage?cedar_ember=1` 응답의 `grants`에서 `usable_now`가 참이고 일시 중지되지 않은 리셋권의 `resets_left`만 합산해 `리셋권 1개`처럼 표시함. 툴팁에도 사용할 수 있는 리셋권의 전체/5시간 구분과 만료 시각만 보여줌. 사용량과 같은 요청 하나로 읽으므로 조회 횟수는 늘지 않음. 서버가 Claude Code 클라이언트에만 리셋권을 알려 주므로 설치된 Claude Code 버전으로 `claude-cli/<버전> (external, cli)` User-Agent를 보냄(config의 `claude_cli_version`으로 지정 가능). 리셋권을 사용하지 않으며, 리셋권 대상이 아닌 계정은 줄을 숨기고 조회 실패는 `--`로 표시함.
 

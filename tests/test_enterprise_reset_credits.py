@@ -101,12 +101,12 @@ class EnterpriseResetCreditTests(unittest.TestCase):
             html = render.render(snap, theme)
             self.assertIn("$70.95", html)
             self.assertIn("$250.00", html)
-            self.assertIn("리셋권 0개", html)
+            self.assertIn("리셋권 1개", html)
             self.assertNotIn("사용 가능", html)
         html = render.render_overlay(snap)
         self.assertIn("Enterprise", html)
         self.assertIn("$70.95", html)
-        self.assertIn("리셋권 0개", html)
+        self.assertIn("리셋권 1개", html)
         self.assertNotIn("사용 가능", html)
         self.assertIn("$70.95", snap["detail_text"])
         self.assertNotIn("API 키 모드", snap["detail_text"])
@@ -146,7 +146,6 @@ class EnterpriseResetCreditTests(unittest.TestCase):
         self.assertEqual(plan_usage.extract_reset_credit_expiries({}), [])
 
     def test_every_view_shows_reset_credit_expiry_as_tooltip(self):
-        self.codex["reset_credits"]["applicable_available_count"] = 1
         self.codex["reset_credits"]["expires_at"] = [self.now + 2 * 86400 + 3 * 3600]
         snap = self.build()
         expiry = dt.datetime.fromtimestamp(self.now + 2 * 86400 + 3 * 3600).strftime("%m-%d %H:%M")

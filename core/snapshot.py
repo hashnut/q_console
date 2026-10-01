@@ -304,8 +304,12 @@ def build(cfg: dict, previous=None) -> dict:
             if session:
                 provider["limits"].append(session)
         if provider_id == "codex":
-            provider["reset_credits"] = raw.get("reset_credits") or {
+            credits = raw.get("reset_credits") or {
                 "available_count": None, "applicable_available_count": None}
+            # Codex's web Usage page lists owned, unspent credits. The separate
+            # applicable count can be zero while the account has credits left.
+            provider["reset_credits"] = {
+                **credits, "display_count": credits.get("available_count")}
         elif provider_id == "claude-code" and raw.get("reset_credits") is not None:
             # Absent in API-key mode and for accounts that are not offered resets.
             provider["reset_credits"] = raw["reset_credits"]
@@ -388,9 +392,9 @@ def text_report(providers: list[dict], stamp: _dt.datetime) -> str:
 
 
 def reset_credit_tooltip(credits, now: int) -> str:
-    """Hover text for reset credits that can be used now."""
+    """Expiry text for the credits included in the displayed count."""
     credits = credits or {}
-    if not credits.get("applicable_available_count"):
+    if not credits.get("display_count", credits.get("applicable_available_count")):
         return ""
     expiries = credits.get("expires_at")
     if expiries is None:
@@ -411,5 +415,5 @@ def reset_credit_tooltip(credits, now: int) -> str:
 
 def reset_credit_text(credits) -> str:
     credits = credits or {}
-    applicable = credits.get("applicable_available_count")
-    return "리셋권 %s" % ("--" if applicable is None else "%d개" % applicable)
+    count = credits.get("display_count", credits.get("applicable_available_count"))
+    return "리셋권 %s" % ("--" if count is None else "%d개" % count)
