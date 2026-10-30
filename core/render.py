@@ -616,7 +616,8 @@ def _provider_icon(filename: str, label: str, mime: str) -> str:
 
 # Official provider artwork, embedded so the overlay works fully offline.
 # Claude: https://claude.ai/favicon.svg
-# Codex: OpenAI.Codex 26.1023.6621.0, webview/assets/codex-app-ga-logo-3e5209898ca3.png
+# Codex display: ChatGPT desktop icon, OpenAI.Codex 26.1023.6621.0,
+# assets/Square44x44Logo.targetsize-96_altform-unplated.png
 # Gemini: https://www.gstatic.com/lamda/images/gemini_sparkle_aurora_33f86dc0c0257da337c63.svg
 ICON_CLAUDE = _provider_icon("claude.svg", "Claude", "image/svg+xml")
 ICON_CODEX = _provider_icon("codex.png", "Codex", "image/png")

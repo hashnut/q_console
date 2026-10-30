@@ -51,3 +51,9 @@
 - QA: PASS. 표시 조합 4개·사용량 표시/모델 35개 통과. 숨긴 데스크톱의 실제 무음 WebView2 캡처에서 세 컬러 아이콘·크기·정렬을 직접 확인했다. clipped=[]·스크롤 없음·창 활성화 없음. 증거: `build/brand-icon-qa/overlay.png`·`render.log`.
 - 최종 PyInstaller 빌드·EXE/ZIP 바이트 및 CRC 검사 PASS. SHA256 `bdf340a7a291c063da5394d6abece79f9ab9ebd12829d5aeac2e241135ba3667`.
 - 새 EXE 재시작 exit 0. 실제 runtime의 세 이미지 파일과 생성된 오버레이의 data URI·브랜드별 alt, 실계정 Gemini status=ok 확인. 로컬 커밋하며 push하지 않는다.
+
+## Codex 표시 아이콘 정정
+
+- 사용자 첨부 이미지 지시대로 Codex에 흰색 ChatGPT 데스크톱 아이콘을 표시한다. 시작 HEAD `5ad5f35`, 작업 트리 깨끗함, pull 최신 확인. 첨부의 우측 상단 숫자는 알림 배지로 보고 원본 아이콘만 사용한다.
+- 설치된 공식 OpenAI.Codex 26.1023.6621.0의 `assets/Square44x44Logo.targetsize-96_altform-unplated.png`를 원본 그대로 `ui/codex.png`로 교체했다. 첨부 이미지와 원본을 직접 확인했다. 기존 16px 크기·정렬을 유지한다.
+- QA: NOT_RUN. 이미지 교체만 있어 신규 테스트·전체 테스트·e2e 없이 숨김 무음 WebView2 실렌더와 최종 EXE를 확인한다.
