@@ -56,4 +56,7 @@
 
 - 사용자 첨부 이미지 지시대로 Codex에 흰색 ChatGPT 데스크톱 아이콘을 표시한다. 시작 HEAD `5ad5f35`, 작업 트리 깨끗함, pull 최신 확인. 첨부의 우측 상단 숫자는 알림 배지로 보고 원본 아이콘만 사용한다.
 - 설치된 공식 OpenAI.Codex 26.1023.6621.0의 `assets/Square44x44Logo.targetsize-96_altform-unplated.png`를 원본 그대로 `ui/codex.png`로 교체했다. 첨부 이미지와 원본을 직접 확인했다. 기존 16px 크기·정렬을 유지한다.
-- QA: NOT_RUN. 이미지 교체만 있어 신규 테스트·전체 테스트·e2e 없이 숨김 무음 WebView2 실렌더와 최종 EXE를 확인한다.
+- QA: PASS. 숨긴 무음 WebView2 캡처에서 흰색 ChatGPT 심볼을 직접 확인했다. 초기 기존 QA의 활성화 assertion이 실패했으나 렌더·clipped=[]는 생성되었다. 입력 데스크톱의 전경 HWND를 실행 전후 별도 계측한 재검사에서 foreground_preserved=True 및 render_exit=0 PASS. 증거: `build/chatgpt-icon-qa/overlay.png`·`render-focus.log`.
+- 최종 EXE 빌드·교체 완료. 시작 대기 25초 제한을 넘겨 최초 runtime 이미지 검사는 실패했으나, 후속 확인에서 트레이 PID 68672(21:35:46 시작)와 21:35:48 snapshot·runtime 이미지·실제 overlay data URI의 새 아이콘 바이트 일치를 확인했다. 중복 재실행하지 않았다.
+- 루트/dist/ZIP 내부 EXE 일치·CRC 검사 PASS. SHA256 `a8155030ac0951c40728bef1611b1f9cedf9a4cec8e1f989a45ec4c36efe85eb`.
+- 이미지 교체만 있어 신규 테스트·전체 테스트·e2e는 실행하지 않았다. 로컬 커밋하며 push하지 않는다.
