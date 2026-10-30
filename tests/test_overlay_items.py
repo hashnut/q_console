@@ -20,7 +20,7 @@ class OverlayItemsTests(unittest.TestCase):
                     for key, label in labels.items():
                         self.assertEqual(">" + label + "</span>" in html, key in selected)
                     self.assertEqual("id='clk'" in html, "clock" in selected)
-                    self.assertEqual("aria-label='ChatGPT'" in html, "codex" in selected)
+                    self.assertEqual("alt='Codex 아이콘'" in html, "codex" in selected)
                     segments = int(bool(set(selected) & {"claude-code", "fable"})) + int("codex" in selected) + int("gemini" in selected)
                     self.assertEqual(html.count("class='div'"), max(0, segments - 1))
                     self.assertIn("q_console:drag-start", html)

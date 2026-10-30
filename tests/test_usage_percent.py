@@ -115,7 +115,7 @@ class UsagePresentationTests(unittest.TestCase):
 
     @patch("core.snapshot.now_ms")
     @patch("core.snapshot._read_current")
-    def test_overlay_shows_three_percentages_and_chatgpt_mark(self, read, now_ms):
+    def test_overlay_shows_percentages_and_codex_icon(self, read, now_ms):
         read.return_value = self.claude, self.codex, {}
         now_ms.return_value = self.now * 1000
         snap = snapshot.build({"warning_used_percent": 80})
@@ -128,8 +128,8 @@ class UsagePresentationTests(unittest.TestCase):
         self.assertGreaterEqual(html.count(">0.0%</span>"), 2)
         self.assertGreaterEqual(html.count("(4d 0h)"), 2)
         self.assertIn("(7d 0h)", html)
-        self.assertIn("aria-label='ChatGPT'", html)
-        self.assertIn("M304.246 294.611", html)
+        self.assertIn("alt='Codex 아이콘'", html)
+        self.assertIn("data:image/png;base64,", html)
         self.assertIn("postMessage('q_console:drag-start')", html)
         self.assertIn("postMessage('q_console:drag-move')", html)
         self.assertIn("cursor:move", html)

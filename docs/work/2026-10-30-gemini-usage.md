@@ -40,3 +40,14 @@
 - QA: PASS. 오버레이 표시 조합 검사 4개 통과. 별도 숨김 데스크톱의 무음 WebView2 캡처에서 컬러 아이콘·정렬을 직접 확인했고 clipped=[]·스크롤 없음·활성화 없음. 증거: `build/gemini-icon-qa/overlay.png`와 `render.log`.
 - PyInstaller 재빌드, 루트/dist EXE 및 단일 EXE ZIP 바이트·CRC 일치 확인. 새 EXE SHA256 `9b015d9d437d9676e294d2d91eb60cbffaa1545978819d64b9bc29a71dca08d0`.
 - 신규 테스트·전체 e2e는 추가하지 않았다. 현재 기능의 표시 조합과 실제 렌더만 확인했다. 실행 파일을 갱신하고 트레이 재시작 exit 0 확인. 실제 runtime의 SVG 파일·오버레이 data URI 및 Gemini status=ok 확인. 로컬 커밋하며 push하지 않는다.
+
+## Claude·Codex 아이콘 보완
+
+- 사용자 요청: Claude·Codex도 예쁜 아이콘으로 교체한다. 시작 HEAD `1aabfd8`, 작업 트리 깨끗함, `git pull --ff-only` 최신 확인.
+- Claude: https://claude.ai/favicon.svg 의 공식 주황색 심볼을 `ui/claude.svg`에 보관했다.
+- Codex: 현재 설치된 공식 OpenAI.Codex 26.1023.6621.0의 `app.asar` 내 `webview/assets/codex-app-ga-logo-3e5209898ca3.png` 이미지 에셋(9,974 bytes)을 원본 그대로 `ui/codex.png`에 보관했다. 파란 꽃 모양에 터미널 기호가 들어간 컬러 앱 아이콘이다.
+- 기존 간이 Claude 선형 심볼·청록색 ChatGPT 로고를 교체한다. Gemini 포함 세 아이콘을 16px로 맞추고 항목 폭도 3px씩 늘린다. 원본을 다시 그리거나 재색칠하지 않으며 HTML에 data URI로 내장한다.
+- 기존 표시 테스트의 ChatGPT path 기대값은 새 Codex 이미지에 맞춘다. 신규 테스트·전체 e2e는 추가하지 않는다.
+- QA: PASS. 표시 조합 4개·사용량 표시/모델 35개 통과. 숨긴 데스크톱의 실제 무음 WebView2 캡처에서 세 컬러 아이콘·크기·정렬을 직접 확인했다. clipped=[]·스크롤 없음·창 활성화 없음. 증거: `build/brand-icon-qa/overlay.png`·`render.log`.
+- 최종 PyInstaller 빌드·EXE/ZIP 바이트 및 CRC 검사 PASS. SHA256 `bdf340a7a291c063da5394d6abece79f9ab9ebd12829d5aeac2e241135ba3667`.
+- 새 EXE 재시작 exit 0. 실제 runtime의 세 이미지 파일과 생성된 오버레이의 data URI·브랜드별 alt, 실계정 Gemini status=ok 확인. 로컬 커밋하며 push하지 않는다.
