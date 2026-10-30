@@ -31,3 +31,12 @@
 - 이번 구현·테스트·문서·EXE/ZIP을 로컬 커밋한다. 이 작업에서 push 요청은 없으므로 원격에 push하지 않는다.
 
 - 최종 EXE의 자동 갱신: 초기 실측 20:54:14 → 20:55:14 KST. 수동 refresh·재로그인 없이 `status=ok` 및 Gemini 세 한도가 유지됨을 확인했다.
+
+## Gemini 아이콘 보완
+
+- 사용자 요청: Gemini에도 브랜드 아이콘을 표시한다. 시작 HEAD `01f0457`, 기존 변경 없음, pull 최신 확인.
+- Google Gemini 공개 사이트에서 사용하는 공식 컬러 sparkle SVG를 `ui/gemini.svg`에 보관했다. 오버레이에는 data URI로 내장해 오프라인에서도 표시한다. 기존 아이콘과 같은 13px 크기·6px 간격이며 추가 폭 19px을 반영한다.
+- 출처: https://www.gstatic.com/lamda/images/gemini_sparkle_aurora_33f86dc0c0257da337c63.svg
+- QA: PASS. 오버레이 표시 조합 검사 4개 통과. 별도 숨김 데스크톱의 무음 WebView2 캡처에서 컬러 아이콘·정렬을 직접 확인했고 clipped=[]·스크롤 없음·활성화 없음. 증거: `build/gemini-icon-qa/overlay.png`와 `render.log`.
+- PyInstaller 재빌드, 루트/dist EXE 및 단일 EXE ZIP 바이트·CRC 일치 확인. 새 EXE SHA256 `9b015d9d437d9676e294d2d91eb60cbffaa1545978819d64b9bc29a71dca08d0`.
+- 신규 테스트·전체 e2e는 추가하지 않았다. 현재 기능의 표시 조합과 실제 렌더만 확인했다. 실행 파일을 갱신하고 트레이 재시작 exit 0 확인. 실제 runtime의 SVG 파일·오버레이 data URI 및 Gemini status=ok 확인. 로컬 커밋하며 push하지 않는다.

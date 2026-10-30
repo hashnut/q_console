@@ -7,6 +7,6 @@
 | Claude API 크레딧 및 Codex 추가 크레딧 연동 | Claude API 크레딧 잔액($200) 및 Codex 추가 크레딧 잔액(61k)을 파싱하여 대시보드 카드, 오버레이 바(전용 토글 옵션 포함), 텍스트 리포트에 실시간 표시한다. 배포 EXE/ZIP에도 반영한다. | 완료 | 78개 단위 테스트 통과, 실계정 61,039 크레딧 및 $200 API 잔액 일치 확인 | - |
 | Claude API 크레딧 잔액 정확도 수정 | 콘솔 잔액 기준점 입력(트레이·CLI) 후 이후 사용분만 공식 단가로 빼서 콘솔과 몇 센트 안에서 일치한다. 월 경계에서 초기화되지 않는다. 배포 EXE/ZIP 반영. | 완료 | 82개 테스트 통과, 콘솔 $134.06 / 앱 $134.01 일치 | [작업 기록](docs/work/2026-10-30-claude-api-credit.md) |
 | Claude Console 조직 잔액 직접 조회 | 다른 PC 사용분을 포함한 웹 잔액을 주기적으로 읽고 실패 시 실측 시각/오류를 표시한다. 배포 EXE 반영. | 완료 | 95개 테스트, EXE·웹 $122.77 일치, 저장된 로그인 재사용·주기 갱신·최종 EXE $120.31·숨김 조회 포커스 보존 PASS. 기존 오버레이 QA의 활성화 assertion 실패는 기록에 분리. | [작업 기록](docs/work/2026-10-30-console-live-balance.md) |
-| Gemini 사용량 추가 | Codex 오른쪽에 Antigravity Gemini 주간·5시간·Argon 사용량과 재설정 시간을 표시하고 토글·대시보드·EXE에 반영한다. | 완료 | 신규 9개 및 기존 영향 검사 PASS, 실제 계정·WebView2 4화면·최종 EXE 확인 | [작업 기록](docs/work/2026-10-30-gemini-usage.md) |
+| Gemini 사용량 추가 | Codex 오른쪽에 Antigravity Gemini 주간·5시간·Argon 사용량과 재설정 시간을 표시하고 토글·대시보드·EXE에 반영한다. | 완료 | 신규 9개 및 기존 영향 검사 PASS, 실제 계정·WebView2 4화면·최종 EXE·공식 Gemini 아이콘 확인 | [작업 기록](docs/work/2026-10-30-gemini-usage.md) |
 
 Claude Console 웹 세션으로 조직 전체 실제 잔액을 주기적으로 조회한다. 기존 로컬 기준점은 명시적으로 선택하는 고급 옵션으로만 유지한다.

@@ -18,6 +18,9 @@ Three themes, matching the tray's Theme submenu:
 from __future__ import annotations
 
 import html
+import base64
+from pathlib import Path
+import sys
 
 from .config import overlay_items
 from .snapshot import claude_api_credit_tip, reset_credit_text
@@ -654,6 +657,13 @@ ICON_CODEX = (
     "569.549 312.883 565.228C334.473 586.341 364.222 599.776 396.852 "
     "599.776Z' fill='#37c9a3'/></svg>")
 
+# Official Gemini sparkle from gemini.google.com, embedded for offline use.
+# https://www.gstatic.com/lamda/images/gemini_sparkle_aurora_33f86dc0c0257da337c63.svg
+ICON_GEMINI = (
+    "<img class='oi' alt='Gemini 아이콘' src='data:image/svg+xml;base64,%s'>"
+    % base64.b64encode((Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+                        / "ui" / "gemini.svg").read_bytes()).decode("ascii"))
+
 OVERLAY_CSS = """
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#0c0f13;cursor:move;user-select:none;-webkit-user-select:none;touch-action:none}
@@ -804,8 +814,8 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
         width += 19
     if "gemini" in selected:
         markup, val, reset, lbl, extra_w = metric("gemini", "Gemini 주간")
-        segments.append("<div class='seg'>%s</div>" % markup)
-        width += len(val) * 7 + 6 * (len(lbl) + len(reset)) + 24 + extra_w
+        segments.append("<div class='seg'>%s%s</div>" % (ICON_GEMINI, markup))
+        width += 19 + len(val) * 7 + 6 * (len(lbl) + len(reset)) + 24 + extra_w
     width += 20 * max(0, len(segments) - 1)
     body = "<div class='div'></div>".join(segments)
     # Live wall clock, not the refresh stamp: the strip is only re-rendered on
