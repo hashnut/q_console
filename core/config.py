@@ -21,6 +21,15 @@ DETAIL_PATH = os.path.join(APP_HOME, "detail.html")
 OVERLAY_PATH = os.path.join(APP_HOME, "overlay.html")
 SCAN_PATH = os.path.join(APP_HOME, "scan-cache.json")
 
+ALL_OVERLAY_ITEMS = [
+    "claude-code",
+    "claude-api",
+    "fable",
+    "codex",
+    "codex-credit",
+    "clock",
+]
+
 DEFAULTS = {
     # Credentials stay in the clients' own files, never in the usage cache.
     # Expired Claude OAuth credentials are refreshed and atomically renewed.
@@ -45,7 +54,10 @@ DEFAULTS = {
     # out of this file. An ordinary API key is never stored here: it is only
     # detected (env or Claude Code's settings.json) and never sent anywhere.
     "anthropic_admin_key": "",
-    "claude_api_budget_usd": 100.0,
+    "claude_api_budget_usd": 200.0,
+    "claude_api_credit_usd": 200.0,
+    "claude_credit_expiry": "2026-11-04",
+    "claude_credit_start_date": "",
     "codex_api_budget_tokens": 50_000_000,
 
     "warning_used_percent": 80,
@@ -66,7 +78,7 @@ def overlay_items(cfg: dict | None = None) -> list[str]:
     selected = (cfg or {}).get("overlay_items", defaults)
     if not isinstance(selected, list):
         return list(defaults)
-    return [item for item in defaults if item in selected] or list(defaults)
+    return [item for item in ALL_OVERLAY_ITEMS if item in selected] or list(defaults)
 
 THEME_ALIASES = {
     "board-ember": "surfacer", "board-slate": "surfacer", "board-abyss": "phosphor",

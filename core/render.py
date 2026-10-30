@@ -48,6 +48,33 @@ def reset_credit_html(provider, tag="div", cls="account-info") -> str:
     return "<%s class='%s'%s>%s</%s>" % (
         tag, cls, title, esc(reset_credit_text(provider["reset_credits"])), tag)
 
+def account_credits_html(provider, tag="div", cls="account-info") -> str:
+    """Codex additional credits balance."""
+    credits = provider.get("account_credits") or {}
+    bal = credits.get("balance")
+    if bal is None:
+        return ""
+    tip = "추가 크레딧 잔액: {:,.1f}".format(bal)
+    title = " title='%s'" % esc(tip)
+    val_text = "{:,.0f}".format(bal)
+    return "<%s class='%s'%s>크레딧 <b>%s</b> 남음</%s>" % (
+        tag, cls, title, val_text, tag)
+
+
+def claude_api_credits_html(provider, tag="div", cls="account-info") -> str:
+    """Claude API credits balance and usage."""
+    credits = provider.get("api_credits") or {}
+    rem = credits.get("remaining")
+    tot = credits.get("total")
+    if rem is None:
+        return ""
+    tip = "Anthropic API 크레딧 (총 %s, 만료: %s)" % (
+        fmt_usd(tot), credits.get("expiry") or "--")
+    title = " title='%s'" % esc(tip)
+    return "<%s class='%s'%s>API 크레딧 <b>%s</b> 남음</%s>" % (
+        tag, cls, title, fmt_usd(rem), tag)
+
+
 
 def pct_text(value) -> str:
     if value is None:
@@ -230,6 +257,10 @@ def provider_card(provider):
             body += "<div class='metric-note'>%s</div>" % esc(provider.get("note"))
         if provider.get("reset_credits") is not None:
             body += reset_credit_html(provider)
+        if provider.get("account_credits") and provider["account_credits"].get("has_credits"):
+            body += account_credits_html(provider)
+        if provider.get("api_credits") and provider["api_credits"].get("has_credits"):
+            body += claude_api_credits_html(provider)
     meta = []
     if provider.get("plan"):
         meta.append("plan %s" % provider["plan"])
@@ -536,6 +567,10 @@ def _mini(snap):
                     esc(limit.get("primary_text")), esc(limit.get("budget_text"))))
         if provider.get("reset_credits") is not None:
             rows.append(reset_credit_html(provider))
+        if provider.get("account_credits") and provider["account_credits"].get("has_credits"):
+            rows.append(account_credits_html(provider))
+        if provider.get("api_credits") and provider["api_credits"].get("has_credits"):
+            rows.append(claude_api_credits_html(provider))
     banner = snap["gui_model"]["banner"]
     body = (
         "<div class='mtop'><b>q_console</b><span>%s · %s 전</span></div>%s"
@@ -695,28 +730,68 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
                               esc(extra_value), extra_mark, esc(extra_reset)))
             extra_width += (len(extra_value) * 7 + 6 * (len(extra_label) + len(extra_reset))
                             + 24)
+
         # Reset credits close the provider's segment, after every window.
         html_value += detail
         return html_value, value + ("*" if stale else ""), reset, label, extra_width
 
+    def claude_api_metric():
+        claude_prov = by_id.get("claude-code") or {}
+        api_cred = claude_prov.get("api_credits") or {}
+        rem = api_cred.get("remaining")
+        tot = api_cred.get("total") or 200.0
+        val_text = ("$%.0f" % rem) if rem is not None else "--"
+        tip = "Anthropic API 크레딧: 잔액 $%.2f 남음 (총 $%.2f)" % (rem or 0.0, tot)
+        html = ("<span class='k' title='%s'>API</span>"
+                "<span class='v' style='color:#e08257' title='%s'>%s</span>"
+                % (esc(tip), esc(tip), esc(val_text)))
+        w = len(val_text) * 7 + 6 * len("API") + 16
+        return html, w
+
+    def codex_credit_metric():
+        codex_prov = by_id.get("codex") or {}
+        acc_cred = codex_prov.get("account_credits") or {}
+        bal = acc_cred.get("balance")
+        val_text = ("{:.1f}k".format(bal / 1000) if bal >= 1000 else "{:,.0f}".format(bal)) if bal is not None else "--"
+        tip = "Codex 추가 크레딧: {:,.0f} 남음".format(bal or 0)
+        html = ("<span class='k' title='%s'>크레딧</span>"
+                "<span class='v' style='color:#37c9a3' title='%s'>%s</span>"
+                % (esc(tip), esc(tip), esc(val_text)))
+        w = len(val_text) * 7 + 6 * len("크레딧") + 16
+        return html, w
+
     segments = []
-    # Include room for font/DPI rounding and Korean labels in narrow selections.
     width = 40
-    for icon, providers in (
-        (ICON_CLAUDE, (("claude-code", "Claude"), ("fable", "Fable"))),
-        (ICON_CODEX, (("codex", "Codex"),)),
-    ):
-        metrics = []
-        for provider_id, label in providers:
-            if provider_id not in selected:
-                continue
-            markup, value, reset, label, extra_width = metric(provider_id, label)
-            metrics.append(markup)
-            # Include flex gaps and the optional stale marker, not just glyphs.
-            width += len(value) * 7 + 6 * (len(label) + len(reset)) + 24 + extra_width
-        if metrics:
-            segments.append("<div class='seg'>%s%s</div>" % (icon, "".join(metrics)))
-            width += 19
+
+    claude_metrics = []
+    if "claude-code" in selected:
+        markup, val, reset, lbl, extra_w = metric("claude-code", "Claude")
+        claude_metrics.append(markup)
+        width += len(val) * 7 + 6 * (len(lbl) + len(reset)) + 24 + extra_w
+    if "claude-api" in selected:
+        markup, w = claude_api_metric()
+        claude_metrics.append(markup)
+        width += w
+    if "fable" in selected:
+        markup, val, reset, lbl, extra_w = metric("fable", "Fable")
+        claude_metrics.append(markup)
+        width += len(val) * 7 + 6 * (len(lbl) + len(reset)) + 24 + extra_w
+    if claude_metrics:
+        segments.append("<div class='seg'>%s%s</div>" % (ICON_CLAUDE, "".join(claude_metrics)))
+        width += 19
+
+    codex_metrics = []
+    if "codex" in selected:
+        markup, val, reset, lbl, extra_w = metric("codex", "Codex")
+        codex_metrics.append(markup)
+        width += len(val) * 7 + 6 * (len(lbl) + len(reset)) + 24 + extra_w
+    if "codex-credit" in selected:
+        markup, w = codex_credit_metric()
+        codex_metrics.append(markup)
+        width += w
+    if codex_metrics:
+        segments.append("<div class='seg'>%s%s</div>" % (ICON_CODEX, "".join(codex_metrics)))
+        width += 19
     width += 20 * max(0, len(segments) - 1)
     body = "<div class='div'></div>".join(segments)
     # Live wall clock, not the refresh stamp: the strip is only re-rendered on

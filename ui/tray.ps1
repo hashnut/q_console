@@ -211,7 +211,7 @@ function Save-OverlayFlag {
 }
 
 function Get-OverlayItems {
-    $all = @('claude-code', 'fable', 'codex', 'clock')
+    $all = @('claude-code', 'claude-api', 'fable', 'codex', 'codex-credit', 'clock')
     try {
         $cfg = Get-Content -Raw -Encoding UTF8 (Join-Path $AppHome 'config.json') | ConvertFrom-Json
         if ($cfg.overlay_items -is [array]) {
@@ -740,7 +740,15 @@ $script:OverlayItemsPending = $null
 $script:OverlayItemsBusy = $false
 $script:OverlayDisplayItems = New-Object System.Collections.ArrayList
 $overlayItemsRoot = New-Object System.Windows.Forms.ToolStripMenuItem 'Overlay 표시 항목'
-foreach ($entry in @(@('claude-code', 'Claude'), @('fable', 'Fable'), @('codex', 'Codex'), @('clock', '시계'))) {
+$itemsDef = @(
+    @('claude-code', 'Claude (주간/세션)'),
+    @('claude-api', 'Claude API 크레딧 ($200)'),
+    @('fable', 'Fable'),
+    @('codex', 'Codex (주간)'),
+    @('codex-credit', 'Codex 추가 크레딧 (61k)'),
+    @('clock', '시계')
+)
+foreach ($entry in $itemsDef) {
     $mi = New-Object System.Windows.Forms.ToolStripMenuItem $entry[1]
     $mi.Tag = $entry[0]
     $mi.CheckOnClick = $true

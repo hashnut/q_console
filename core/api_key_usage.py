@@ -72,6 +72,21 @@ def _oauth_token(cfg: dict):
     return oauth.get("accessToken") or None
 
 
+def _opencodex_api_key() -> str | None:
+    try:
+        p = os.path.expanduser("~/.opencodex/config.json")
+        if os.path.exists(p):
+            with open(p, encoding="utf-8") as handle:
+                data = json.load(handle)
+            prov = (data.get("providers") or {}).get("anthropic-apikey") or {}
+            key = prov.get("apiKey")
+            if key and isinstance(key, str) and key.strip():
+                return key.strip()
+    except Exception:
+        pass
+    return None
+
+
 def claude_auth_mode(cfg: dict) -> dict:
     """-> {"mode": "subscription"|"api_key"|"none", "source", "admin_key"}
 
@@ -106,6 +121,8 @@ def claude_auth_mode(cfg: dict) -> dict:
         if str(settings.get(name) or "").strip():
             return {"mode": "api_key", "source": "settings.json",
                     "admin_key": admin_key}
+    if _opencodex_api_key():
+        return {"mode": "api_key", "source": "OpenCodex API 키", "admin_key": admin_key}
     if admin_key:
         return {"mode": "api_key", "source": "Admin 키", "admin_key": admin_key}
     return {"mode": "none", "source": "", "admin_key": ""}
@@ -218,6 +235,15 @@ def collect_claude_api(cfg: dict, now: int, mode: dict) -> dict:
     """
     budget = float(cfg.get("claude_api_budget_usd") or 0)
     start, end = month_window(now)
+    start_date_str = cfg.get("claude_credit_start_date")
+    if start_date_str:
+        try:
+            dt_start = _dt.datetime.fromisoformat(str(start_date_str).strip())
+            start_epoch = int(dt_start.timestamp())
+            if start_epoch <= now:
+                start = max(start, start_epoch)
+        except Exception:
+            pass
     admin_key = mode.get("admin_key") or ""
 
     if admin_key:
@@ -254,9 +280,11 @@ def _claude_api_result(total: float, fable, budget: float, end: int,
                        note: str, billed: bool) -> dict:
     if not budget or budget <= 0:
         note += " · 예산 미설정(claude_api_budget_usd)"
+    remaining = max(0.0, budget - total) if budget else 0.0
     detail = {
         "used": _gauge(total, budget), "resets_at": end,
-        "amount": total, "budget": budget, "unit": "usd", "billed": billed,
+        "amount": total, "budget": budget, "remaining": remaining,
+        "unit": "usd", "billed": billed,
     }
     if fable is None:
         # The cost report is not broken out per model here, so there is no
@@ -297,4 +325,73 @@ def collect_codex_api(cfg: dict, now: int) -> dict:
                    "amount": tokens, "budget": budget, "unit": "tokens",
                    "billed": False},
         "plan": "api",
+    }
+
+
+def claude_api_credit_status(cfg: dict, now: int) -> dict:
+    """Track Anthropic API credit balance and usage."""
+    total = float(cfg.get("claude_api_credit_usd") or cfg.get("claude_api_budget_usd") or 200.0)
+    expiry = str(cfg.get("claude_credit_expiry") or "2026-11-04").strip()
+    mode = claude_auth_mode(cfg)
+    start, end = month_window(now)
+    start_date_str = cfg.get("claude_credit_start_date")
+    if start_date_str:
+        try:
+            dt_start = _dt.datetime.fromisoformat(str(start_date_str).strip())
+            start_epoch = int(dt_start.timestamp())
+            if start_epoch <= now:
+                start = max(start, start_epoch)
+        except Exception:
+            pass
+
+    # If the user is signed into subscription (Max/Pro), the local claude projects
+    # log represents subscription usage, not API key spend. In pure API key mode,
+    # the local log or Admin API reports actual token spend.
+    spent = 0.0
+    if mode.get("mode") == "api_key":
+        admin_key = mode.get("admin_key") or ""
+        if admin_key:
+            try:
+                spent = admin_cost_usd(admin_key, start, end)
+            except Exception:
+                spent = 0.0
+        else:
+            local = claude_code.collect(cfg)
+            if local.get("status") == "ok":
+                for record in local.get("records") or []:
+                    if record.get("ts", 0) >= start:
+                        spent += record.get("cost", 0.0)
+
+    # Check OpenCodex usage for Anthropic API usage if applicable
+    try:
+        ocx_usage_path = os.path.expanduser("~/.opencodex/usage.jsonl")
+        if os.path.exists(ocx_usage_path):
+            with open(ocx_usage_path, encoding="utf-8", errors="ignore") as f:
+                # Seek recent records
+                f.seek(max(0, os.path.getsize(ocx_usage_path) - 100000))
+                for line in f:
+                    try:
+                        row = json.loads(line)
+                        if (row.get("provider") == "anthropic-apikey" or
+                            "anthropic" in str(row.get("requestedModel", ""))):
+                            if row.get("timestamp", 0) / 1000 >= start:
+                                # approximate cost if available
+                                u = row.get("usage") or {}
+                                inp = u.get("inputTokens") or 0
+                                out = u.get("outputTokens") or 0
+                                # Haiku / Sonnet rough estimate if needed
+                                spent += (inp * 0.000003 + out * 0.000015)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    remaining = max(0.0, total - spent)
+    return {
+        "total": total,
+        "spent": spent,
+        "remaining": remaining,
+        "expiry": expiry,
+        "currency": "USD",
+        "has_credits": total > 0,
     }

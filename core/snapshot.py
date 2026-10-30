@@ -103,7 +103,11 @@ def _budget_texts(value: dict, unit: str) -> tuple:
               else "이번 달 · 로컬 세션 로그 환산")
     # The hero row shows only `sub`, so the spend itself has to live here or a
     # per-token user sees a percentage with no dollars behind it.
-    sub = "%s / %s · %s" % (primary, budget_text, origin)
+    rem = value.get("remaining")
+    if rem is not None and unit == "usd":
+        sub = "%s / %s (잔액 %s 남음) · %s" % (primary, budget_text, fmt_usd(rem), origin)
+    else:
+        sub = "%s / %s · %s" % (primary, budget_text, origin)
     return primary, budget_text, sub
 
 
@@ -310,18 +314,32 @@ def build(cfg: dict, previous=None) -> dict:
             # applicable count can be zero while the account has credits left.
             provider["reset_credits"] = {
                 **credits, "display_count": credits.get("available_count")}
-        elif provider_id == "claude-code" and raw.get("reset_credits") is not None:
-            # Absent in API-key mode and for accounts that are not offered resets.
-            provider["reset_credits"] = raw["reset_credits"]
+            provider["account_credits"] = raw.get("account_credits")
+            if provider.get("account_credits") and provider["account_credits"].get("has_credits"):
+                provider["credit_text"] = account_credit_text(provider["account_credits"])
+        elif provider_id == "claude-code":
+            if raw.get("reset_credits") is not None:
+                provider["reset_credits"] = raw["reset_credits"]
+            api_credits = api_key_usage.claude_api_credit_status(cfg, now)
+            provider["api_credits"] = api_credits
+            if raw.get("mode") == "api_key" and api_credits.get("has_credits"):
+                provider["api_credit_text"] = claude_api_credit_text(api_credits)
         if provider.get("reset_credits") is not None:
             provider["reset_credit_tip"] = reset_credit_tooltip(provider["reset_credits"], now)
         providers.append(provider)
     verdict, mode = _verdict(providers)
     stamp = _dt.datetime.fromtimestamp(now)
 
-    summary = [_provider_summary(p) + (" · " + reset_credit_text(p["reset_credits"])
-                                       if p.get("reset_credits") is not None else "")
-               for p in providers]
+    summary = []
+    for p in providers:
+        item = _provider_summary(p)
+        if p.get("reset_credits") is not None:
+            item += " · " + reset_credit_text(p["reset_credits"])
+        if p.get("credit_text"):
+            item += " · " + p["credit_text"]
+        if p.get("api_credit_text"):
+            item += " · " + p["api_credit_text"]
+        summary.append(item)
 
     return {
         "generated_at_ms": now * 1000,
@@ -378,6 +396,10 @@ def text_report(providers: list[dict], stamp: _dt.datetime) -> str:
             lines.append("  " + reset_credit_text(provider["reset_credits"]))
             if provider.get("reset_credit_tip"):
                 lines.append("  " + provider["reset_credit_tip"])
+        if provider.get("credit_text"):
+            lines.append("  " + provider["credit_text"])
+        if provider.get("api_credit_text"):
+            lines.append("  " + provider["api_credit_text"])
     lines.append("")
     if any(p["limits"][0].get("unit") and not p["limits"][0].get("account_spend") for p in providers):
         # API-key mode: the percentage is a budget gauge, not a plan limit, and
@@ -417,3 +439,19 @@ def reset_credit_text(credits) -> str:
     credits = credits or {}
     count = credits.get("display_count", credits.get("applicable_available_count"))
     return "리셋권 %s" % ("--" if count is None else "%d개" % count)
+
+
+def account_credit_text(credits) -> str:
+    credits = credits or {}
+    bal = credits.get("balance")
+    if bal is not None:
+        return "크레딧 {:,.0f} 남음".format(bal)
+    return ""
+
+
+def claude_api_credit_text(credits) -> str:
+    credits = credits or {}
+    rem = credits.get("remaining")
+    if rem is not None:
+        return "API 크레딧 ${:,.2f} 남음".format(rem)
+    return ""

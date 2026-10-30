@@ -492,6 +492,13 @@ def extract_codex(data: dict) -> dict:
     except (TypeError, ValueError, OverflowError):
         reset_at = None
     reset_credits = data.get("rate_limit_reset_credits") or {}
+    credits_data = data.get("credits") or {}
+    balance_val = None
+    if credits_data.get("balance") is not None:
+        try:
+            balance_val = float(credits_data["balance"])
+        except (TypeError, ValueError):
+            balance_val = None
     return {
         "weekly": {
             "used": _number(weekly.get("used_percent")),
@@ -501,6 +508,11 @@ def extract_codex(data: dict) -> dict:
         "reset_credits": {
             "available_count": _count(reset_credits.get("available_count")),
             "applicable_available_count": _count(reset_credits.get("applicable_available_count")),
+        },
+        "account_credits": {
+            "has_credits": bool(credits_data.get("has_credits")),
+            "balance": balance_val,
+            "unlimited": bool(credits_data.get("unlimited")),
         },
     }
 
@@ -552,4 +564,5 @@ def collect_codex(cfg: dict) -> dict:
             "weekly": {"used": None, "resets_at": None},
             "plan": None,
             "reset_credits": {"available_count": None, "applicable_available_count": None},
+            "account_credits": {"has_credits": False, "balance": None, "unlimited": False},
         }
