@@ -27,6 +27,7 @@ ALL_OVERLAY_ITEMS = [
     "fable",
     "codex",
     "codex-credit",
+    "gemini",
     "clock",
 ]
 
@@ -35,6 +36,7 @@ DEFAULTS = {
     # Expired Claude OAuth credentials are refreshed and atomically renewed.
     "claude_credentials_file": "~/.claude/.credentials.json",
     "codex_auth_file": "~/.codex/auth.json",
+    "gemini_cli_path": "~/.gemini/bin/agy.exe",
     "claude_settings_file": "~/.claude/settings.json",
     # Local session logs - the usage source for people on an API key, who have
     # no plan percentage to read.
@@ -78,7 +80,7 @@ DEFAULTS = {
     "always_on_top": False,
     # First launch opens the compact always-on-top strip at screen bottom-right.
     "overlay_mode": True,
-    "overlay_items": ["claude-code", "fable", "codex", "clock"],
+    "overlay_items": ["claude-code", "fable", "codex", "gemini", "clock"],
 }
 
 

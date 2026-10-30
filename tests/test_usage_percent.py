@@ -101,22 +101,22 @@ class UsagePresentationTests(unittest.TestCase):
 
     @patch("core.snapshot.now_ms")
     @patch("core.snapshot._read_current")
-    def test_snapshot_contains_only_three_measured_percentages(self, read, now_ms):
-        read.return_value = self.claude, self.codex
+    def test_snapshot_keeps_missing_gemini_unknown(self, read, now_ms):
+        read.return_value = self.claude, self.codex, {}
         now_ms.return_value = self.now * 1000
         snap = snapshot.build({"warning_used_percent": 80})
 
         self.assertEqual([p["id"] for p in snap["providers"]],
-                         ["claude-code", "fable", "codex"])
+                         ["claude-code", "fable", "codex", "gemini"])
         self.assertEqual([p["limits"][0]["used"] for p in snap["providers"]],
-                         [3.0, 0.0, 0.0])
+                         [3.0, 0.0, 0.0, None])
         self.assertTrue(all(p["limits"][0]["measured"] for p in snap["providers"]))
         self.assertNotIn("$", snap["detail_text"])
 
     @patch("core.snapshot.now_ms")
     @patch("core.snapshot._read_current")
     def test_overlay_shows_three_percentages_and_chatgpt_mark(self, read, now_ms):
-        read.return_value = self.claude, self.codex
+        read.return_value = self.claude, self.codex, {}
         now_ms.return_value = self.now * 1000
         snap = snapshot.build({"warning_used_percent": 80})
         html = render.render_overlay(snap)
@@ -160,7 +160,7 @@ class StaleCarryForwardTests(unittest.TestCase):
         }
 
     def _build(self, claude, previous=None, at=None):
-        with patch("core.snapshot.now_ms", return_value=(at or self.now) * 1000),              patch("core.snapshot._read_current", return_value=(claude, self.codex)):
+        with patch("core.snapshot.now_ms", return_value=(at or self.now) * 1000),              patch("core.snapshot._read_current", return_value=(claude, self.codex, {})):
             return snapshot.build({"warning_used_percent": 80}, previous=previous)
 
     def test_failed_read_keeps_the_previous_percentage_marked_stale(self):
@@ -181,7 +181,7 @@ class StaleCarryForwardTests(unittest.TestCase):
         self.assertIn(">16%</span>", html)
         self.assertIn("class='st'", html)
         # The old snapshot has only weekly data; the missing session stays visible.
-        self.assertEqual(html.count(">--</span>"), 1)
+        self.assertEqual(html.count(">--</span>"), 2)
 
     def test_recovered_read_replaces_the_carried_value(self):
         stale = self._build(self.failed_claude,
@@ -252,7 +252,7 @@ class ClaudeSessionWindowTests(unittest.TestCase):
         claude = {"status": status, "note": "fixture",
                   **plan_usage.extract_claude(data, "max")}
         with patch("core.snapshot.now_ms", return_value=(at or self.now) * 1000), \
-             patch("core.snapshot._read_current", return_value=(claude, self.codex)):
+             patch("core.snapshot._read_current", return_value=(claude, self.codex, {})):
             return snapshot.build({"warning_used_percent": 80}, previous=previous)
 
     def test_session_is_extracted_from_limits_and_legacy_five_hour(self):
@@ -416,7 +416,7 @@ class ApiKeyModeTests(unittest.TestCase):
                             "amount": 250_000, "budget": 1_000_000,
                             "unit": "tokens", "billed": False},
                  "plan": "api"}
-        with patch("core.snapshot.now_ms", return_value=self.now * 1000),              patch("core.snapshot._read_current", return_value=(claude, codex)):
+        with patch("core.snapshot.now_ms", return_value=self.now * 1000),              patch("core.snapshot._read_current", return_value=(claude, codex, {})):
             snap = snapshot.build(self.cfg)
 
         limit = snap["providers"][0]["limits"][0]

@@ -12,8 +12,8 @@ from core import __main__ as app
 
 class OverlayItemsTests(unittest.TestCase):
     def test_all_item_combinations(self):
-        labels = {"claude-code": "Claude 주간", "fable": "Fable", "codex": "Codex"}
-        for count in range(1, 5):
+        labels = {"claude-code": "Claude 주간", "fable": "Fable", "codex": "Codex", "gemini": "Gemini 주간"}
+        for count in range(1, len(config.DEFAULTS["overlay_items"]) + 1):
             for selected in itertools.combinations(config.DEFAULTS["overlay_items"], count):
                 with self.subTest(selected=selected):
                     html = render.render_overlay({}, {"overlay_items": list(selected)})
@@ -21,8 +21,8 @@ class OverlayItemsTests(unittest.TestCase):
                         self.assertEqual(">" + label + "</span>" in html, key in selected)
                     self.assertEqual("id='clk'" in html, "clock" in selected)
                     self.assertEqual("aria-label='ChatGPT'" in html, "codex" in selected)
-                    self.assertEqual(html.count("class='div'"), int(
-                        "codex" in selected and bool(set(selected) & {"claude-code", "fable"})))
+                    segments = int(bool(set(selected) & {"claude-code", "fable"})) + int("codex" in selected) + int("gemini" in selected)
+                    self.assertEqual(html.count("class='div'"), max(0, segments - 1))
                     self.assertIn("q_console:drag-start", html)
         only_codex = render.render_overlay({}, {"overlay_items": ["codex"]})
         width = lambda html: int(re.search("data-w='(\\d+)'", html)[1])

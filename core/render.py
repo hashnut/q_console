@@ -32,7 +32,7 @@ TONE = {
     "degraded": "#f2c14e",
 }
 
-ACCENT = {"claude-code": "#e08257", "fable": "#f2ad62", "codex": "#37c9a3"}
+ACCENT = {"claude-code": "#e08257", "fable": "#f2ad62", "codex": "#37c9a3", "gemini": "#8ab4f8"}
 
 DAYS = ["월", "화", "수", "목", "금", "토", "일"]
 
@@ -301,16 +301,16 @@ body{background:#0a0c0f}
 .banner{border-radius:9px;padding:9px 13px;font-size:14px;font-weight:600;
  border:1px solid rgba(255,255,255,.07);background:#12161c;display:flex;gap:9px;align-items:center}
 .banner i{width:8px;height:8px;border-radius:50%;flex:none}
-.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;flex:1;min-height:0}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;flex:1;min-height:0}
 .card{background:#11151a;border:1px solid #1d232b;border-top:2px solid var(--accent);
  border-radius:11px;padding:10px 14px 11px;display:flex;flex-direction:column;gap:6px}
 .card header{display:flex;align-items:baseline;gap:8px}
 .card h2{font-size:12px;letter-spacing:.16em;font-weight:700;color:var(--accent)}
 .card .meta{margin-left:auto;color:#69737f;font-size:10.5px;text-align:right}
-.hero{display:flex;align-items:flex-end;gap:12px}
-.hero-num{font-size:46px;line-height:.94;font-weight:800;font-variant-numeric:tabular-nums}
+.hero{display:flex;align-items:flex-end;gap:8px}
+.hero-num{font-size:40px;line-height:.94;font-weight:800;font-variant-numeric:tabular-nums}
 .hero-meta{padding-bottom:3px;min-width:0;flex:1}
-.hero-label{font-size:12px;color:#c7ced7;font-weight:600}
+.hero-label{font-size:12px;color:#c7ced7;font-weight:600;white-space:nowrap}
 .hero-sub{font-size:11px;color:#7b8590;margin-top:2px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .hero-reset{margin-left:auto;text-align:right;padding-bottom:3px}
 .hero-reset b{display:block;font-size:15px;font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -376,7 +376,7 @@ body:after{content:'';position:fixed;inset:0;pointer-events:none;
 .top .stamp{margin-left:auto}
 .banner{border:1px solid #17513e;padding:7px 11px;font-size:13px;display:flex;gap:9px;align-items:center}
 .banner i{width:7px;height:7px;flex:none}
-.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;flex:1;min-height:0}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;flex:1;min-height:0}
 .card{border:1px solid #164536;padding:8px 12px;display:flex;flex-direction:column;gap:6px}
 .card header{display:flex;gap:8px;align-items:baseline}
 .card h2{font-size:12px;letter-spacing:.2em;color:var(--accent)}
@@ -528,15 +528,17 @@ def _board(snap, css, theme):
         "* 직전 실측값 유지 · 미제공 값은 --</div>"
         % (esc(snap["generated_stamp"]), esc(fmt_age(snap["generated_at_ms"])),
            colour, esc(banner.get("text")), cards))
-    return _shell("q_console / %s" % theme, css, body, 1080, 280)
+    extra_rows = max((len(p.get("limits") or []) - 1 for p in providers), default=0)
+    return _shell("q_console / %s" % theme, css, body, 1360, max(320, 240 + extra_rows * 65))
 
 
 # The mini strip is 400 px wide: every row has to name itself in ~7 characters,
 # so provider and window collapse to codes rather than wrapping onto two lines.
-MINI_TAG = {"claude-code": "Claude", "fable": "Fable", "codex": "Codex"}
-MINI_KEY = {"week": "", "month": "월간", "session": "5h"}
+MINI_TAG = {"claude-code": "Claude", "fable": "Fable", "codex": "Codex", "gemini": "Gemini"}
+MINI_KEY = {"week": "", "month": "월간", "session": "5h",
+            "gemini-weekly": "주간", "gemini-5h": "5h", "gemini-argon-wtu-weekly": "Argon"}
 # Overlay labels for a provider's secondary windows (Claude's 5-hour session).
-OVERLAY_KEY = {"session": "5h"}
+OVERLAY_KEY = {"session": "5h", "gemini-5h": "5h", "gemini-argon-wtu-weekly": "Argon"}
 
 
 def _mini(snap):
@@ -598,8 +600,7 @@ def render(snap: dict, theme: str) -> str:
 
 
 # ── overlay strip ───────────────────────────────────────────────────────────
-# A one-line always-on-top HUD with exactly three account percentages:
-# Claude Code, Fable, and Codex (with the ChatGPT mark).
+# A one-line always-on-top HUD with Claude Code, Fable, Codex and Gemini.
 # Written to overlay.html on every refresh; the tray's overlay mode shows this
 # document instead of the board. Icons instead of provider names - the whole
 # point is to cost as few pixels as possible.
@@ -801,6 +802,10 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
     if codex_metrics:
         segments.append("<div class='seg'>%s%s</div>" % (ICON_CODEX, "".join(codex_metrics)))
         width += 19
+    if "gemini" in selected:
+        markup, val, reset, lbl, extra_w = metric("gemini", "Gemini 주간")
+        segments.append("<div class='seg'>%s</div>" % markup)
+        width += len(val) * 7 + 6 * (len(lbl) + len(reset)) + 24 + extra_w
     width += 20 * max(0, len(segments) - 1)
     body = "<div class='div'></div>".join(segments)
     # Live wall clock, not the refresh stamp: the strip is only re-rendered on
@@ -821,4 +826,4 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
         stamp = clock = ""
     return _shell("q_console overlay", OVERLAY_CSS,
                   body + stamp + "<script>%s%s</script>" % (OVERLAY_DRAG_SCRIPT, clock),
-                  max(80, min(1000, width)), 32)
+                  max(80, width), 32)

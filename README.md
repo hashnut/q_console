@@ -1,6 +1,6 @@
 # q_console
 
-Windows 트레이/오버레이로 **Claude의 주간·5시간 사용률과 Fable / Codex의 주간 사용률**을 보여주는 작은 도구입니다.
+Windows 트레이/오버레이로 **Claude의 주간·5시간 사용률, Fable / Codex 주간 사용률과 Antigravity의 Gemini 한도**을 보여주는 작은 도구입니다.
 
 A tiny Windows tray/overlay app showing Claude's **weekly and five-hour session usage**, plus Fable and Codex weekly usage.
 
@@ -18,6 +18,7 @@ A tiny Windows tray/overlay app showing Claude's **weekly and five-hour session 
 | Claude Enterprise | 사용량 기반 Enterprise 계정의 월간 실측 금액, 실제 한도, 사용률 |
 | Fable | Claude Usage의 Fable 전용 주간 사용률 |
 | Codex | ChatGPT Usage의 Weekly usage limit, 보유 리셋권 |
+| Gemini | Antigravity `/usage`의 Gemini 주간·5시간 한도와 별도 Argon 한도 |
 
 구독 계정의 사용률은 계정 Usage 응답에서 읽습니다. Claude의 현재 세션은 5시간 창이며 주간 한도와 별도로 재설정됩니다.
 단, 사용량 기반 Claude Enterprise는 계정 Usage가 반환한 월간 금액과 실제 한도를 표시함.
@@ -55,18 +56,19 @@ q_console.bat --print    텍스트 사용률 출력
 
 트레이 아이콘 **좌클릭 = 대시보드**, **우클릭 = Refresh / Theme / Overlay / Always on Top / Exit**.
 1분마다 자동 갱신하며 Refresh를 누르면 다시 조회합니다. Claude가 요청 제한(HTTP 429)을 반환하면 서버의 `Retry-After` 동안 대기합니다. 별도 안내가 없으면 5분부터 최대 30분까지 재시도 간격을 늘립니다. 대기 중에도 Codex와 화면은 갱신됩니다. 첫 실행 기본값은 Overlay ON입니다.
-트레이 우클릭 → **Overlay 표시 항목**에서 Claude / Fable / Codex / 시계를 각각 켜고 끌 수 있습니다.
+트레이 우클릭 → **Overlay 표시 항목**에서 Claude / Fable / Codex / Gemini / 시계를 각각 켜고 끌 수 있습니다.
 선택은 재시작 후에도 유지되며, 표시하는 항목에 맞춰 오버레이 폭이 줄어듭니다. 최소 한 항목은 켜 두어야 합니다.
 오버레이는 항상 위에 표시되며, 다른 최상위 창에 가려지거나 최소화·숨김 상태가 되면 1초 주기로 자동 복구합니다.
 작업 중인 창의 포커스와 오버레이 위치를 유지하고, 작업 표시줄 미리 보기(Peek) 중에도 흐려지지 않도록 설정합니다.
 
 ## 데이터 기준
 
-세 값 모두 로컬 로그 추정치가 아니라, 설치된 클라이언트가 사용하는 **읽기 전용 계정 Usage 응답값**입니다.
+구독 사용률은 로컬 로그 추정치가 아니라, 설치된 클라이언트의 **읽기 전용 계정 Usage 응답값**입니다.
 
 - **Claude / Fable**: `~/.claude/.credentials.json`의 현재 Claude Code 로그인을 이용해 Anthropic 계정 Usage를 조회합니다. weekly_all, 현재 세션 session(기존 응답의 five_hour), Fable weekly_scoped를 각각 별도 퍼센트로 표시합니다. 현재 세션이 0%여도 표시하며, 조회 실패로 값이 없으면 `5h --`로 남겨 두고 툴팁에서 실패 이유를 보여줍니다.
 - **Claude Enterprise**: Enterprise 로그인을 자동 인식하고, 주간 한도가 없는 사용량 기반 계정은 `spend`의 금액·통화·소수점 단위 또는 기존 `extra_usage` 응답을 읽어 월간 사용량으로 표시함. 공개 API 단가로 환산하거나 로컬 예산을 계정 한도로 대신 표시하지 않음.
 - **Codex**: `~/.codex/auth.json`의 현재 ChatGPT 로그인을 이용해 Codex 계정 Usage의 7일 창을 조회합니다.
+- **Gemini**: 로그인된 Antigravity CLI(`~/.gemini/bin/agy.exe`, 1.1.11 이상)의 `agy -p /usage --output-format json` 결과를 읽습니다. 모델 요청 없이 사용량만 조회하며 자동 업데이트를 끕니다. Codex 오른쪽에 Gemini 공용 주간·5시간 사용률과 별도 Argon 주간 사용률·재설정 시간을 표시합니다. Antigravity의 Claude/GPT 한도와 Gemini 웹·앱의 사용량은 포함하지 않습니다. Antigravity 로그인은 CLI가 관리하며 q_console은 토큰을 복사하지 않습니다. 조회 실패는 이전 계정 값을 유지하지 않고 `--`로 표시합니다. 다른 설치 경로는 설정의 `gemini_cli_path`로 지정할 수 있습니다.
 - **Codex 리셋권**: 웹 Usage의 사용 가능 목록과 같은 `rate_limit_reset_credits.available_count`의 보유 개수를 `리셋권 2개`처럼 표시함. 별도 `applicable_available_count`가 0이어도 보유 리셋권은 표시함. 조회 실패·값 미제공은 0개 대신 `--`로 표시함. 리셋권을 사용하지 않음.
 - **Codex 리셋권 만료**: 리셋권이 1개 이상이면 조회 전용 `wham/rate-limit-reset-credits`에서 리셋권별 `expires_at`을 읽어, 리셋권 문구에 마우스를 올리면 만료 시각과 남은 기간을 툴팁으로 보여줌. `/consume`은 호출하지 않음.
 - **Claude 리셋권**: Claude Code의 `/limit-reset`과 같은 `api/oauth/usage?cedar_ember=1` 응답의 `grants`에서 `usable_now`가 참이고 일시 중지되지 않은 리셋권의 `resets_left`만 합산해 `리셋권 1개`처럼 표시함. 툴팁에도 사용할 수 있는 리셋권의 전체/5시간 구분과 만료 시각만 보여줌. 사용량과 같은 요청 하나로 읽으므로 조회 횟수는 늘지 않음. 서버가 Claude Code 클라이언트에만 리셋권을 알려 주므로 설치된 Claude Code 버전으로 `claude-cli/<버전> (external, cli)` User-Agent를 보냄(config의 `claude_cli_version`으로 지정 가능). 리셋권을 사용하지 않으며, 리셋권 대상이 아닌 계정은 줄을 숨기고 조회 실패는 `--`로 표시함.
@@ -131,7 +133,7 @@ q_console.exe --set-claude-credit clear                        기준점 지우�
 
 ## 화면
 
-대시보드에는 Claude Code / Fable / Codex 카드 세 개가 있고, 각 카드에 주간 사용률 %, 재설정까지 남은 시간, 실측 배지가 표시됩니다. Claude 카드에는 현재 세션(5시간)도 표시됩니다. 오버레이는 `Claude 주간 29% (…) 5h 2.0% (…)`처럼 두 창의 사용률과 각 재설정 잔여 시간을 구분합니다. Claude 표시를 끄면 5시간 항목도 함께 숨깁니다. (위 스크린샷 참고)
+대시보드에는 Claude Code / Fable / Codex / Gemini 카드 네 개가 있고, 각 카드에 주간 사용률 %, 재설정까지 남은 시간, 실측 배지가 표시됩니다. Claude 카드에는 현재 세션(5시간)도 표시됩니다. 오버레이는 `Claude 주간 29% (…) 5h 2.0% (…)`처럼 두 창의 사용률과 각 재설정 잔여 시간을 구분합니다. Claude 표시를 끄면 5시간 항목도 함께 숨깁니다. (위 스크린샷 참고)
 Enterprise 로그인에서는 Claude 카드가 `Claude Enterprise`로 바뀌며, 월간 실측 금액·한도·사용률이 대시보드, Mini, 오버레이에 표시됨. Codex 리셋권도 세 화면에 함께 표시됨.
 서버가 Enterprise 리셋 시각을 제공하지 않으면 임의의 카운트다운을 만들지 않고 `--`로 표시함. 이전 월의 금액은 새 월에 재사용하지 않음.
 
@@ -166,7 +168,8 @@ core/api_key_usage.py   API 키 모드: 이번 달 사용량 vs 예산
 core/claude_code.py     ~/.claude/projects 세션 로그 파서 (단가 환산)
 core/codex.py           ~/.codex/sessions 롤아웃 파서 (토큰)
 core/bootstrap.py       첫 실행 WebView2 런타임 자동 설치 (1회)
-core/snapshot.py        세 퍼센트용 화면 모델
+core/gemini.py          Antigravity CLI의 Gemini 주간·5시간·별도 모델 한도
+core/snapshot.py        네 제공자의 화면 모델
 core/render.py          대시보드 / Mini / Overlay 렌더
 core/config.py, util.py
 ui/                     트레이(PowerShell) + WebView2 호스트

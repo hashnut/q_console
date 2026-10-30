@@ -33,7 +33,7 @@ class ClaudeResetCreditTests(unittest.TestCase):
     def build(self, data=None):
         claude = {"status": "ok", **plan_usage.extract_claude(data or self.usage, "max"),
                   "reset_credits": plan_usage.extract_claude_reset_credits(data or self.usage)}
-        with patch("core.snapshot._read_current", return_value=(claude, self.codex)), \
+        with patch("core.snapshot._read_current", return_value=(claude, self.codex, {})), \
              patch("core.snapshot.now_ms", return_value=self.now * 1000):
             return snapshot.build(config.DEFAULTS)
 

@@ -34,14 +34,14 @@ class CodexResetCreditTests(unittest.TestCase):
         return result, get
 
     def build(self, codex):
-        with patch("core.snapshot._read_current", return_value=(self.claude, codex)), \
+        with patch("core.snapshot._read_current", return_value=(self.claude, codex, {})), \
              patch("core.snapshot.now_ms", return_value=self.now * 1000):
             return snapshot.build(config.DEFAULTS)
 
     def test_web_available_count_matches_every_view_even_when_not_applicable(self):
         codex, get = self.collect()
         snap = self.build(codex)
-        provider = snap["providers"][-1]
+        provider = snap["providers"][2]
         self.assertEqual(snapshot.reset_credit_text(provider["reset_credits"]), "리셋권 2개")
         self.assertEqual(provider["reset_credits"]["applicable_available_count"], 0)
         self.assertEqual(provider["reset_credits"]["available_count"], 2)
@@ -55,7 +55,7 @@ class CodexResetCreditTests(unittest.TestCase):
         overlay = render.render_overlay(snap, {"overlay_items": ["codex"]})
         self.assertIn("리셋권 2개", overlay)
         self.assertIn(tip, overlay)
-        self.assertIn("리셋권 2개", snap["summary_lines"][-1])
+        self.assertIn("리셋권 2개", snap["summary_lines"][2])
         self.assertIn("리셋권 2개", snap["detail_text"])
         self.assertEqual(snapshot.reset_credit_text(snap["providers"][0]["reset_credits"]),
                          "리셋권 1개")
@@ -69,14 +69,14 @@ class CodexResetCreditTests(unittest.TestCase):
                 self.usage["rate_limit_reset_credits"].update(
                     available_count=available, applicable_available_count=2)
                 codex, get = self.collect()
-                provider = self.build(codex)["providers"][-1]
+                provider = self.build(codex)["providers"][2]
                 self.assertEqual(snapshot.reset_credit_text(provider["reset_credits"]), expected)
                 self.assertEqual(provider["reset_credit_tip"], "")
                 self.assertEqual(get.call_count, 1)
 
     def test_expiry_failure_preserves_available_count_and_weekly_usage(self):
         codex, _ = self.collect(RuntimeError("detail unavailable"))
-        provider = self.build(codex)["providers"][-1]
+        provider = self.build(codex)["providers"][2]
         self.assertEqual(codex["status"], "ok")
         self.assertEqual(codex["weekly"]["used"], 7)
         self.assertEqual(snapshot.reset_credit_text(provider["reset_credits"]), "리셋권 2개")
@@ -87,7 +87,7 @@ class CodexResetCreditTests(unittest.TestCase):
                 "tokens": {"access_token": "test", "account_id": "test"}}), \
              patch("core.plan_usage._get_json", side_effect=RuntimeError("offline")):
             codex = plan_usage.collect_codex(config.DEFAULTS)
-        provider = self.build(codex)["providers"][-1]
+        provider = self.build(codex)["providers"][2]
         self.assertEqual(snapshot.reset_credit_text(provider["reset_credits"]), "리셋권 --")
         self.assertEqual(provider["reset_credit_tip"], "")
 

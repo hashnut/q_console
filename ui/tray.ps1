@@ -212,7 +212,7 @@ function Save-OverlayFlag {
 }
 
 function Get-OverlayItems {
-    $all = @('claude-code', 'claude-api', 'fable', 'codex', 'codex-credit', 'clock')
+    $all = @('claude-code', 'claude-api', 'fable', 'codex', 'codex-credit', 'gemini', 'clock')
     try {
         $cfg = Get-Content -Raw -Encoding UTF8 (Join-Path $AppHome 'config.json') | ConvertFrom-Json
         if ($cfg.overlay_items -is [array]) {
@@ -582,7 +582,7 @@ function Update-Display {
             # "Claude 11% 7d (F 6%)" -> tag "C", first %/$ token
             $tag = $t.Substring(0,1)
             if ($t -like 'Codex*') { $tag = 'X' }
-            elseif ($t -like 'Grok*') { $tag = 'G' }
+            elseif ($t -like 'Gemini*') { $tag = 'G' }
             elseif ($t -like 'Claude*') { $tag = 'C' }
             $val = ''
             if ($t -match '(\d+(?:\.\d+)?%)') { $val = $Matches[1] }
@@ -747,6 +747,7 @@ $itemsDef = @(
     @('fable', 'Fable'),
     @('codex', 'Codex (주간)'),
     @('codex-credit', 'Codex 추가 크레딧 (61k)'),
+    @('gemini', 'Gemini (모델 한도)'),
     @('clock', '시계')
 )
 foreach ($entry in $itemsDef) {

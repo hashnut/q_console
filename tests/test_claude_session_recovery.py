@@ -26,7 +26,7 @@ class ClaudeSessionRecoveryTests(unittest.TestCase):
             "key": "week", "used": 29, "measured_at": now - 60, "resets_at": now + 86400}]}]}
         claude = {"status": "unavailable", "note": "HTTP 429", "usage_retry": {"after": now + 300},
                   **plan_usage.extract_claude({}, "max")}
-        with patch("core.snapshot._read_current", return_value=(claude, {})), \
+        with patch("core.snapshot._read_current", return_value=(claude, {}, {})), \
              patch("core.snapshot.now_ms", return_value=now * 1000):
             snap = snapshot.build(config.DEFAULTS, previous=previous)
         week, session = snap["providers"][0]["limits"]
@@ -45,7 +45,7 @@ class ClaudeSessionRecoveryTests(unittest.TestCase):
             {"plan": "enterprise", **plan_usage.extract_claude({}, "enterprise")},
         ):
             with self.subTest(claude=claude), \
-                 patch("core.snapshot._read_current", return_value=(claude, {})):
+                 patch("core.snapshot._read_current", return_value=(claude, {}, {})):
                 snap = snapshot.build(config.DEFAULTS)
             self.assertEqual(len(snap["providers"][0]["limits"]), 1)
             html = render.render_overlay(snap, {"overlay_items": ["claude-code"]})
@@ -94,12 +94,13 @@ class ClaudeRetryTests(unittest.TestCase):
     def test_snapshot_persists_retry_and_next_worker_uses_it(self):
         with patch("core.plan_usage._get_json", side_effect=plan_usage.UsageHTTPError(429)) as get:
             failed = self.collect(get)
-        with patch("core.snapshot._read_current", return_value=(failed, {})), \
+        with patch("core.snapshot._read_current", return_value=(failed, {}, {})), \
              patch("core.snapshot.now_ms", return_value=self.now * 1000):
             previous = snapshot.build(config.DEFAULTS)
         self.assertEqual(previous["providers"][0]["usage_retry"], failed["usage_retry"])
         with patch("core.snapshot._read_claude", return_value=failed) as read_claude, \
-             patch("core.snapshot._read_codex", return_value={}):
+             patch("core.snapshot._read_codex", return_value={}), \
+             patch("core.snapshot.gemini.collect", return_value={}):
             snapshot._read_current(config.DEFAULTS, self.now + 60, previous)
         read_claude.assert_called_once_with(config.DEFAULTS, self.now + 60, failed["usage_retry"])
 

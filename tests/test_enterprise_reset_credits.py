@@ -32,7 +32,7 @@ class EnterpriseResetCreditTests(unittest.TestCase):
     def build(self, data=None, previous=None, now=None, failed=False):
         claude = {"status": "unavailable" if failed else "ok",
                   **plan_usage.extract_claude(self.enterprise if data is None else data, "enterprise")}
-        with patch("core.snapshot._read_current", return_value=(claude, self.codex)), \
+        with patch("core.snapshot._read_current", return_value=(claude, self.codex, {})), \
              patch("core.snapshot.now_ms", return_value=(self.now if now is None else now) * 1000):
             return snapshot.build(config.DEFAULTS, previous=previous)
 
@@ -150,7 +150,7 @@ class EnterpriseResetCreditTests(unittest.TestCase):
         snap = self.build()
         expiry = dt.datetime.fromtimestamp(self.now + 2 * 86400 + 3 * 3600).strftime("%m-%d %H:%M")
         tip = "리셋권 만료 · %s (2d 3h 남음)" % expiry
-        self.assertEqual(snap["providers"][-1]["reset_credit_tip"], tip)
+        self.assertEqual(snap["providers"][2]["reset_credit_tip"], tip)
         for theme in ("surfacer", "phosphor", "mini"):
             self.assertIn("title='%s'" % tip, render.render(snap, theme))
         self.assertIn("title='%s'" % tip, render.render_overlay(snap))

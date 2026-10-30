@@ -1,16 +1,17 @@
 """Build the account-usage model consumed by the tray and renderer.
 
-Three providers are exposed:
+Four providers are exposed:
 
 * Claude Code weekly usage (all models)
 * Claude Code current session (five-hour) usage, as a second Claude row
 * Fable weekly scoped usage
 * Codex weekly usage
+* Antigravity Gemini shared weekly/five-hour and separate model allowances
 
 Enterprise usage-based seats show monthly account spend and its actual cap.
 Codex reset credits are separate counts, never percentages or spend budgets.
 
-All three come from the current authenticated account endpoints. Local token
+All values come from current authenticated account usage. Local token
 logs and list-price estimates are deliberately not used as quota values.
 
 Claude OAuth is renewed before its expiry or once after an HTTP 401. If a
@@ -25,7 +26,7 @@ from __future__ import annotations
 import concurrent.futures
 import datetime as _dt
 
-from . import api_key_usage, plan_usage
+from . import api_key_usage, gemini, plan_usage
 from .util import clamp_pct, fmt_dur, fmt_tokens, fmt_usd, now_ms, tone_for
 
 
@@ -34,7 +35,7 @@ from .util import clamp_pct, fmt_dur, fmt_tokens, fmt_usd, now_ms, tone_for
 STALE_MAX_AGE_SEC = 24 * 3600
 
 # Short names for secondary windows in one-line summaries.
-SUMMARY_KEY = {"session": "5h"}
+SUMMARY_KEY = {"session": "5h", "gemini-5h": "5h", "gemini-argon-wtu-weekly": "Argon 주간"}
 
 
 def _limit(key: str, label: str, value: dict, now: int, warn: int,
@@ -232,16 +233,16 @@ def _read_codex(cfg: dict, now: int) -> dict:
     return plan_usage.collect_codex(cfg)
 
 
-def _read_current(cfg: dict, now: int, previous=None) -> tuple[dict, dict]:
-    # Both calls are independent and timeout-bounded. Running them together
-    # prevents a disconnected network from making refresh wait twice.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+def _read_current(cfg: dict, now: int, previous=None) -> tuple[dict, dict, dict]:
+    # Independent, timeout-bounded providers refresh together.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         previous = previous if isinstance(previous, dict) else {}
         previous_claude = next((p for p in previous.get("providers", [])
                                 if p.get("id") == "claude-code"), {})
         claude_future = pool.submit(_read_claude, cfg, now, previous_claude.get("usage_retry"))
         codex_future = pool.submit(_read_codex, cfg, now)
-        return claude_future.result(), codex_future.result()
+        gemini_future = pool.submit(gemini.collect, cfg)
+        return claude_future.result(), codex_future.result(), gemini_future.result()
 
 
 def _pct_text(limit: dict) -> str:
@@ -279,7 +280,7 @@ def build(cfg: dict, previous=None) -> dict:
     now = int(now_ms() / 1000)
     warn = int(cfg.get("warning_used_percent") or 80)
     max_age = int(cfg.get("stale_max_age_sec") or STALE_MAX_AGE_SEC)
-    claude, codex = _read_current(cfg, now, previous)
+    claude, codex, gemini_raw = _read_current(cfg, now, previous)
     prior = _prior_limits(previous)
     specs = [
         ("claude-code", "Claude Enterprise" if claude.get("plan") == "enterprise" else "Claude Code",
@@ -327,6 +328,16 @@ def build(cfg: dict, previous=None) -> dict:
         if provider.get("reset_credits") is not None:
             provider["reset_credit_tip"] = reset_credit_tooltip(provider["reset_credits"], now)
         providers.append(provider)
+    # agy's report has no account identity. Display only fresh reads, so a
+    # changed CLI login can never inherit another account's cached percentage.
+    gemini_values = gemini_raw.get("limits") or [{"window_key": "gemini-weekly",
+                                                 "window_label": "주간 사용량"}]
+    gemini_limits = [_limit(value["window_key"], value["window_label"], value,
+                            now, warn, measured_at=now) for value in gemini_values]
+    gemini_provider = _provider("gemini", "Gemini", gemini_raw, gemini_limits[0])
+    gemini_provider["limits"] = gemini_limits
+    gemini_provider["source"] = "antigravity-cli"
+    providers.append(gemini_provider)
     verdict, mode = _verdict(providers)
     stamp = _dt.datetime.fromtimestamp(now)
 

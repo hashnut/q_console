@@ -46,7 +46,7 @@ class CodexAdditionalCreditTests(unittest.TestCase):
         return result
 
     def build(self, codex):
-        with patch("core.snapshot._read_current", return_value=(self.claude, codex)), \
+        with patch("core.snapshot._read_current", return_value=(self.claude, codex, {})), \
              patch("core.snapshot.now_ms", return_value=self.now * 1000):
             return snapshot.build(config.DEFAULTS)
 
@@ -56,7 +56,7 @@ class CodexAdditionalCreditTests(unittest.TestCase):
         self.assertAlmostEqual(codex["account_credits"]["balance"], 61039.329125)
 
         snap = self.build(codex)
-        provider = snap["providers"][-1]
+        provider = snap["providers"][2]
         self.assertEqual(provider["id"], "codex")
         self.assertIn("크레딧 61,039 남음", provider["credit_text"])
 
@@ -64,7 +64,7 @@ class CodexAdditionalCreditTests(unittest.TestCase):
         self.assertIn("크레딧 61,039 남음", snap["detail_text"])
 
         # Check summary lines
-        self.assertIn("크레딧 61,039 남음", snap["summary_lines"][-1])
+        self.assertIn("크레딧 61,039 남음", snap["summary_lines"][2])
 
         # Check card HTML
         for theme in ("surfacer", "phosphor", "mini"):
@@ -97,7 +97,7 @@ class ClaudeApiCreditTests(unittest.TestCase):
     @patch("core.api_key_usage.os.path.exists", return_value=False)
     def test_claude_card_shows_api_credits(self, exists_mock):
         cfg = dict(config.DEFAULTS, claude_api_credit_source="local", claude_api_credit_usd=200.0, claude_credit_expiry="2026-11-04")
-        with patch("core.snapshot._read_current", return_value=(self.claude, self.codex)), \
+        with patch("core.snapshot._read_current", return_value=(self.claude, self.codex, {})), \
              patch("core.snapshot.now_ms", return_value=self.now * 1000):
             snap = snapshot.build(cfg)
 
@@ -150,7 +150,7 @@ class ClaudeApiCreditTests(unittest.TestCase):
             with patch.object(config, "SCAN_PATH", str(scan_cache)), \
                  patch("core.api_key_usage.os.path.expanduser",
                        side_effect=lambda p: str(ocx_usage) if p.endswith("usage.jsonl") else str(Path(tmpdir) / "none")), \
-                 patch("core.snapshot._read_current", return_value=(self.claude, self.codex)), \
+                 patch("core.snapshot._read_current", return_value=(self.claude, self.codex, {})), \
                  patch("core.snapshot.now_ms", return_value=self.now * 1000):
                 snap = snapshot.build(cfg)
 

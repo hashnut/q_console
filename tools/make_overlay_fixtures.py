@@ -26,18 +26,18 @@ def main(directory):
         ]}, "max")}
     codex = {"status": "ok", "weekly": {"used": 7, "resets_at": now + 3 * 86400},
              "reset_credits": {"available_count": 2, "applicable_available_count": 0}}
-    with patch("core.snapshot._read_current", return_value=(claude, codex)), \
+    with patch("core.snapshot._read_current", return_value=(claude, codex, {})), \
          patch("core.snapshot.now_ms", return_value=now * 1000):
         snap = snapshot.build(config.DEFAULTS)
         (home / "example.html").write_text(render.render_overlay(snap, {
             "overlay_items": ["claude-code", "codex", "clock"]}), encoding="utf-8")
         claude["all_models"]["used"] = claude["session"]["used"] = 100
         snap = snapshot.build(config.DEFAULTS)
-    for count in range(1, 5):
+    for count in range(1, len(config.DEFAULTS["overlay_items"]) + 1):
         for items in itertools.combinations(config.DEFAULTS["overlay_items"], count):
             (home / ("_".join(items) + ".html")).write_text(
                 render.render_overlay(snap, {"overlay_items": list(items)}), encoding="utf-8")
-    print("Wrote example and all 15 item selections to", home)
+    print("Wrote example and all item selections to", home)
 
 
 if __name__ == "__main__":
