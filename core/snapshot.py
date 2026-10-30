@@ -458,3 +458,23 @@ def claude_api_credit_text(credits) -> str:
             return "API 크레딧 ${:,.2f} 남음 (${:,.2f} 사용)".format(rem, spent)
         return "API 크레딧 ${:,.2f} 남음".format(rem)
     return ""
+
+
+def claude_api_credit_tip(credits) -> str:
+    """Where the API balance came from, so an estimate never reads as billed."""
+    credits = credits or {}
+    rem = credits.get("remaining")
+    if rem is None:
+        return ""
+    head = "Anthropic API 크레딧: 잔액 ${:,.2f} / 총 ${:,.2f} (만료 {})".format(
+        rem, float(credits.get("total") or 0.0), credits.get("expiry") or "--")
+    source = credits.get("source")
+    if source == "anchor":
+        at = _dt.datetime.fromtimestamp(int(credits.get("anchor_at") or 0))
+        return "{}\n콘솔 잔액 ${:,.2f} ({} 입력) - 이후 이 PC 사용 추정 ${:,.2f}".format(
+            head, float(credits.get("anchor_usd") or 0.0),
+            at.strftime("%m/%d %H:%M"), float(credits.get("since_anchor") or 0.0))
+    if source == "admin":
+        return head + "\nAdmin Cost API 청구액 기준"
+    return (head + "\n이 PC 로그를 공개 단가로 환산한 추정치입니다."
+            "\n트레이 메뉴 'Claude API 잔액 입력'에 콘솔 잔액을 넣으면 그 값부터 계산합니다.")

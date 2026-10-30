@@ -282,6 +282,12 @@ def _parse_opencodex_chunk(handle, offset: int, api_providers: set[str]) -> tupl
         ts_ms = row.get("timestamp") or 0
         if not ts_ms:
             continue
+        # Bill at completion: the Console deducts a request when it finishes,
+        # and a long Opus turn can straddle the moment the balance was read.
+        try:
+            ts_ms += max(0, int(row.get("durationMs") or 0))
+        except (TypeError, ValueError):
+            pass
         u = row.get("usage") or {}
         if not isinstance(u, dict):
             continue
@@ -310,7 +316,9 @@ def _opencodex_anthropic_api_records() -> list:
         return []
 
     api_providers = _opencodex_anthropic_api_providers()
-    scanner = store.Scanner("opencodex")
+    # v2: rows carry completion time; older cached rows carried start time.
+    scanner = store.Scanner("opencodex-v2")
+    scanner._all.pop("opencodex", None)  # drop the start-time rows for good
     cached = scanner._mine.get(ocx_usage_path)
     prev_offset = 0
     records = []
@@ -464,60 +472,89 @@ def collect_codex_api(cfg: dict, now: int) -> dict:
     }
 
 
+def credit_anchor(cfg: dict):
+    """-> (balance_usd, epoch) the user read off the Console, or None.
+
+    An individual Anthropic organization has no API that returns the prepaid
+    balance (the Admin API is unavailable to individual accounts), so the
+    Console figure the user types in is the only real number. Everything after
+    it is this PC's logged usage priced at list rates.
+    """
+    try:
+        balance = float(cfg.get("claude_credit_anchor_usd"))
+        at = int(cfg.get("claude_credit_anchor_at") or 0)
+    except (TypeError, ValueError):
+        return None
+    if balance < 0 or at <= 0:
+        return None
+    return balance, at
+
+
+def _local_api_spend(cfg: dict, mode: dict, since: int) -> float:
+    """API-key spend this PC logged at or after 'since', priced at list rates.
+
+    Claude Code's own logs count only when Claude Code itself runs on an API
+    key - with a subscription login they are plan usage, not credit spend.
+    OpenCodex rows are filtered to its Anthropic API-key providers either way.
+    """
+    spent = 0.0
+    if mode.get("mode") == "api_key":
+        local = claude_code.collect(cfg)
+        if local.get("status") == "ok":
+            for record in local.get("records") or []:
+                if record.get("ts", 0) >= since:
+                    spent += record.get("cost", 0.0)
+    ocx_spent, _ = _opencodex_anthropic_api_spend(since)
+    return spent + ocx_spent
+
+
 def claude_api_credit_status(cfg: dict, now: int) -> dict:
-    """Track Anthropic API credit balance and usage."""
+    """Anthropic API prepaid credit balance.
+
+    Best source first: an Admin key's billed cost, then the Console balance the
+    user entered minus this PC's usage since, then a pure local estimate.
+    Prepaid credits do not reset with the calendar month, so no source here
+    stops counting at a month boundary.
+    """
     total = float(cfg.get("claude_api_credit_usd") or cfg.get("claude_api_budget_usd") or 200.0)
     base_spent = float(cfg.get("claude_api_base_spent_usd") or 0.0)
     expiry = str(cfg.get("claude_credit_expiry") or "2026-11-04").strip()
     mode = claude_auth_mode(cfg)
-    start, end = month_window(now)
+    result = {"total": total, "expiry": expiry, "currency": "USD",
+              "has_credits": total > 0, "anchor_usd": None, "anchor_at": None,
+              "since_anchor": None}
+
+    anchor = credit_anchor(cfg)
+    if anchor and anchor[1] <= now:
+        balance, at = anchor
+        since_anchor = _local_api_spend(cfg, mode, at)
+        remaining = max(0.0, balance - since_anchor)
+        result.update(source="anchor", remaining=remaining,
+                      spent=max(0.0, total - remaining), anchor_usd=balance,
+                      anchor_at=at, since_anchor=since_anchor)
+        return result
+
+    start, _ = month_window(now)
     start_date_str = cfg.get("claude_credit_start_date")
     if start_date_str:
         try:
-            dt_start = _dt.datetime.fromisoformat(str(start_date_str).strip())
-            start_epoch = int(dt_start.timestamp())
+            start_epoch = int(_dt.datetime.fromisoformat(str(start_date_str).strip()).timestamp())
             if start_epoch <= now:
-                start = max(start, start_epoch)
-        except Exception:
+                start = start_epoch
+        except ValueError:
             pass
 
     admin_key = mode.get("admin_key") or ""
     if admin_key:
         try:
-            spent = admin_cost_usd(admin_key, start, end)
-            remaining = max(0.0, total - spent)
-            return {
-                "total": total,
-                "spent": spent,
-                "remaining": remaining,
-                "expiry": expiry,
-                "currency": "USD",
-                "has_credits": total > 0,
-            }
-        except Exception:
+            spent = admin_cost_usd(admin_key, start, now + 86400)
+            result.update(source="admin", spent=spent,
+                          remaining=max(0.0, total - spent))
+            return result
+        except (OSError, ValueError, RuntimeError):
             pass
 
-    # If the user is signed into subscription (Max/Pro), the local claude projects
-    # log represents subscription usage, not API key spend. In pure API key mode,
-    # the local log reports actual token spend.
-    spent = base_spent
-    if mode.get("mode") == "api_key":
-        local = claude_code.collect(cfg)
-        if local.get("status") == "ok":
-            for record in local.get("records") or []:
-                if record.get("ts", 0) >= start:
-                    spent += record.get("cost", 0.0)
-
-    # Include OpenCodex Anthropic API-key usage (tracked incrementally across the full file).
-    ocx_spent, _ = _opencodex_anthropic_api_spend(start, end)
-    spent += ocx_spent
-
-    remaining = max(0.0, total - spent)
-    return {
-        "total": total,
-        "spent": spent,
-        "remaining": remaining,
-        "expiry": expiry,
-        "currency": "USD",
-        "has_credits": total > 0,
-    }
+    spent = base_spent + _local_api_spend(cfg, mode, start)
+    result.update(source="estimate", spent=spent,
+                  remaining=max(0.0, total - spent))
+    return result

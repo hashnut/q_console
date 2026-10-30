@@ -33,27 +33,35 @@ import os
 from . import config, store
 from .util import parse_iso
 
-# Public list price, USD per million tokens (input, output).
-# Cache reads bill at 0.1x input; 5-minute cache writes 1.25x; 1-hour writes 2x.
+# Public list price, USD per million tokens: (input, output, cache-read multiplier).
+# Source: platform.claude.com/docs/en/about-claude/pricing (checked 2026-10-30).
+# 5-minute cache writes bill at 1.25x input and 1-hour writes at 2x on every
+# model; cache reads are 0.1x except where the third value says otherwise.
+# Claude Haiku 5.5 is priced by prompt length - see HAIKU_5_5_TIERS.
 PRICING = {
-    "claude-fable-5-5": (10.0, 50.0),
-    "claude-fable-5": (10.0, 50.0),
-    "claude-mythos-5": (10.0, 50.0),
-    "claude-opus-5-5": (5.0, 25.0),
-    "claude-opus-5": (5.0, 25.0),
-    "claude-opus-4-8": (5.0, 25.0),
-    "claude-opus-4-7": (5.0, 25.0),
-    "claude-opus-4-6": (5.0, 25.0),
-    "claude-sonnet-5-5": (3.0, 15.0),
-    "claude-sonnet-5": (3.0, 15.0),
-    "claude-sonnet-4-6": (3.0, 15.0),
-    "claude-haiku-5-5": (1.0, 5.0),
-    "claude-haiku-4-5": (1.0, 5.0),
+    "claude-fable-5-5": (10.0, 50.0, 0.10),  # not on the price page; Fable tier assumed
+    "claude-fable-5-1": (10.0, 50.0, 0.025),
+    "claude-mythos-5-1": (10.0, 50.0, 0.025),
+    "claude-fable-5": (10.0, 50.0, 0.10),
+    "claude-mythos-5": (10.0, 50.0, 0.10),
+    "claude-opus-5-5": (4.0, 20.0, 0.05),
+    "claude-opus-5": (5.0, 25.0, 0.10),
+    "claude-opus-4-8": (5.0, 25.0, 0.10),
+    "claude-opus-4-7": (5.0, 25.0, 0.10),
+    "claude-opus-4-6": (5.0, 25.0, 0.10),
+    "claude-sonnet-5-5": (2.0, 10.0, 0.05),
+    "claude-sonnet-5": (2.0, 10.0, 0.10),
+    "claude-sonnet-4-6": (3.0, 15.0, 0.10),
+    "claude-haiku-4-5": (1.0, 5.0, 0.10),
 }
-FALLBACK_PRICE = (5.0, 25.0)  # unknown model -> price it like an Opus tier
+# (prompt-token ceiling, rates): a prompt counts input, cache reads and writes.
+HAIKU_5_5_TIERS = ((100_000, (0.10, 0.50, 0.10)), (None, (0.50, 2.50, 0.10)))
+FALLBACK_PRICE = (5.0, 25.0, 0.10)  # unknown model -> price it like an Opus tier
 
 PRETTY = {
     "claude-fable-5-5": "Fable 5.5",
+    "claude-fable-5-1": "Fable 5.1",
+    "claude-mythos-5-1": "Mythos 5.1",
     "claude-fable-5": "Fable 5",
     "claude-mythos-5": "Mythos 5",
     "claude-opus-5-5": "Opus 5.5",
@@ -74,25 +82,29 @@ def is_fable(model: str) -> bool:
     return (model or "").startswith("claude-fable-")
 
 
-def _rates_for(model: str) -> tuple[float, float]:
+def _rates_for(model: str, prompt_tokens: int = 0) -> tuple[float, float, float]:
+    if model == "claude-haiku-5-5":
+        for ceiling, rates in HAIKU_5_5_TIERS:
+            if ceiling is None or prompt_tokens <= ceiling:
+                return rates
     if model in PRICING:
         return PRICING[model]
     low = (model or "").lower()
     if "fable" in low or "mythos" in low:
-        return (10.0, 50.0)
+        return (10.0, 50.0, 0.10)
     if "sonnet" in low:
-        return (3.0, 15.0)
+        return (3.0, 15.0, 0.10)
     if "haiku" in low:
-        return (1.0, 5.0)
+        return (1.0, 5.0, 0.10)
     return FALLBACK_PRICE
 
 
 def price_of(model: str, inp, out, cache_read, cw5, cw1) -> float:
-    p_in, p_out = _rates_for(model)
+    p_in, p_out, read_mult = _rates_for(model, inp + cache_read + cw5 + cw1)
     return (
         inp * p_in
         + out * p_out
-        + cache_read * p_in * 0.10
+        + cache_read * p_in * read_mult
         + cw5 * p_in * 1.25
         + cw1 * p_in * 2.00
     ) / 1_000_000.0

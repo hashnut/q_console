@@ -108,6 +108,26 @@ q_console.exe --set-usage-mode api_key         자동 감지 대신 강제 (auto
 - 로컬 로그 환산은 **이 PC의 CLI 작업만** 봅니다. 다른 기기나 다른 앱에서 같은 키로 쓴
   API 호출은 포함되지 않습니다(그건 Admin 키 경로에서만 보입니다).
 
+### Claude API 선불 크레딧 잔액
+
+개인(Individual) 조직은 Admin API를 쓸 수 없고, 선불 잔액을 돌려주는 공개 API도 없습니다.
+그래서 잔액은 **콘솔에서 본 값을 기준점으로 저장하고, 그 뒤 이 PC에서 쓴 양만 빼서** 계산합니다.
+
+```
+트레이 우클릭 → Claude API 잔액 입력...                        platform.claude.com 대시보드의 '조직 크레딧' 금액 입력
+q_console.exe --set-claude-credit 136.04                       지금 시각을 기준점으로 저장
+q_console.exe --set-claude-credit 136.04 2026-10-30T14:47:05   콘솔을 본 시각을 직접 지정
+q_console.exe --set-claude-credit clear                        기준점 지우기
+```
+
+- 기준점 이후 사용분은 OpenCodex의 Anthropic API 키 요청(`~/.opencodex/usage.jsonl`)과, Claude Code가
+  API 키로 로그인한 경우의 세션 로그를 [공식 가격표](https://platform.claude.com/docs/en/about-claude/pricing)
+  단가로 환산합니다. 요청은 완료 시각 기준으로 셉니다. 2026-10-30 실측에서 기준점 입력 5분 뒤 콘솔
+  잔액 $134.06, 앱 계산 $134.01이었습니다.
+- 선불 크레딧은 달이 바뀌어도 초기화되지 않으므로 잔액 계산은 월 경계에서 멈추지 않습니다.
+- 다른 PC나 웹 콘솔에서 쓴 양은 보이지 않습니다. 차이가 커지면 콘솔 값을 다시 입력하세요. 잔액에 마우스를
+  올리면 기준점 금액·입력 시각·이후 추정 사용액이 나옵니다. 기준점이 없으면 툴팁에 추정치라고 표시합니다.
+
 ## 화면
 
 대시보드에는 Claude Code / Fable / Codex 카드 세 개가 있고, 각 카드에 주간 사용률 %, 재설정까지 남은 시간, 실측 배지가 표시됩니다. Claude 카드에는 현재 세션(5시간)도 표시됩니다. 오버레이는 `Claude 주간 29% (…) 5h 2.0% (…)`처럼 두 창의 사용률과 각 재설정 잔여 시간을 구분합니다. Claude 표시를 끄면 5시간 항목도 함께 숨깁니다. (위 스크린샷 참고)

@@ -20,7 +20,7 @@ from __future__ import annotations
 import html
 
 from .config import overlay_items
-from .snapshot import reset_credit_text
+from .snapshot import claude_api_credit_tip, reset_credit_text
 from .util import fmt_age, fmt_tokens, fmt_usd
 
 TONE = {
@@ -65,15 +65,11 @@ def claude_api_credits_html(provider, tag="div", cls="account-info") -> str:
     """Claude API credits balance and usage."""
     credits = provider.get("api_credits") or {}
     rem = credits.get("remaining")
-    tot = credits.get("total")
     spent = credits.get("spent")
     if rem is None:
         return ""
     spent_val = float(spent or 0.0)
-    tot_val = float(tot or 200.0)
-    tip = "Anthropic API 크레딧: 잔액 $%.2f / 총 %s (이번 달 $%.2f 사용, 만료: %s)" % (
-        rem, fmt_usd(tot_val), spent_val, credits.get("expiry") or "--")
-    title = " title='%s'" % esc(tip)
+    title = " title='%s'" % esc(claude_api_credit_tip(credits))
     rem_text = "$%.2f" % rem
     if spent_val > 0:
         return "<%s class='%s'%s>API 크레딧 <b>%s</b> 남음 ($%.2f 사용)</%s>" % (
@@ -746,10 +742,8 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
         claude_prov = by_id.get("claude-code") or {}
         api_cred = claude_prov.get("api_credits") or {}
         rem = api_cred.get("remaining")
-        tot = float(api_cred.get("total") or 200.0)
-        spent = float(api_cred.get("spent") or 0.0)
         val_text = ("$%.2f" % rem) if rem is not None else "--"
-        tip = "Anthropic API 크레딧: 잔액 $%.2f / $%.2f (이번 달 $%.2f 사용)" % (rem or 0.0, tot, spent)
+        tip = claude_api_credit_tip(api_cred) or "Anthropic API 크레딧: --"
         html = ("<span class='k' title='%s'>API</span>"
                 "<span class='v' style='color:#e08257' title='%s'>%s</span>"
                 % (esc(tip), esc(tip), esc(val_text)))

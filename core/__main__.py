@@ -10,6 +10,10 @@ Worker CLI (this is the contract tray.ps1 expects):
     --refresh                 rebuild the cache + detail.html, print the report
     --set-usage-mode M        auto | subscription | api_key (auto detects)
     --set-budget claude=100   API-key mode budget: claude=<USD>, codex=<tokens>
+    --set-claude-credit 137.92 [2026-10-30T14:47]
+                              Claude API balance read off the Console (and when);
+                              later usage on this PC is subtracted from it.
+                              "clear" forgets the entered balance.
     --set-theme <id>          persist theme, re-render (surfacer|phosphor|mini)
     --set-always-on-top on|off
     --set-overlay-items codex,clock   visible overlay items (comma-separated)
@@ -27,11 +31,13 @@ Human CLI:
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 
 if __package__ in (None, ""):  # allow `python core/__main__.py`
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -358,6 +364,34 @@ def main(argv) -> int:
             emit("usage-mode는 auto | subscription | api_key 중 하나여야 합니다")
             return 2
         emit("usage_mode=%s" % config.update(usage_mode=name)["usage_mode"])
+        return 0
+
+    if "--set-claude-credit" in args:
+        index = args.index("--set-claude-credit")
+        raw = (args[index + 1] if index + 1 < len(args) else "").strip()
+        if raw.lower() == "clear":
+            config.update(claude_credit_anchor_usd=None, claude_credit_anchor_at=0)
+            emit("claude_credit_anchor cleared")
+            return 0
+        try:
+            balance = float(raw.replace("$", "").replace("US", "").replace(",", ""))
+        except ValueError:
+            emit("사용법: --set-claude-credit <콘솔 잔액 USD> [YYYY-MM-DDTHH:MM]")
+            return 2
+        if balance < 0:
+            emit("잔액은 0 이상이어야 합니다")
+            return 2
+        at = int(time.time())
+        stamp = args[index + 2] if index + 2 < len(args) and not args[index + 2].startswith("--") else ""
+        if stamp:
+            try:
+                at = int(datetime.datetime.fromisoformat(stamp).timestamp())
+            except ValueError:
+                emit("시각 형식은 YYYY-MM-DDTHH:MM 입니다")
+                return 2
+        config.update(claude_credit_anchor_usd=balance, claude_credit_anchor_at=at)
+        emit("claude_credit_anchor=%.2f at %s" % (
+            balance, datetime.datetime.fromtimestamp(at).strftime("%Y-%m-%d %H:%M:%S")))
         return 0
 
     if "--set-budget" in args:

@@ -59,6 +59,11 @@ DEFAULTS = {
     "claude_api_base_spent_usd": 0.0,
     "claude_credit_expiry": "2026-11-04",
     "claude_credit_start_date": "",
+    # The Console's real balance as last entered by the user (--set-claude-credit
+    # or the tray menu) and when. The API credit figure is this balance minus
+    # the usage this PC logged afterwards; null = not entered yet.
+    "claude_credit_anchor_usd": None,
+    "claude_credit_anchor_at": 0,
     "codex_api_budget_tokens": 50_000_000,
 
     "warning_used_percent": 80,

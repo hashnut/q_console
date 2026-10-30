@@ -765,6 +765,20 @@ foreach ($entry in $itemsDef) {
 Update-OverlayItemChecks
 [void]$menu.Items.Add($overlayItemsRoot)
 
+# Individual Anthropic organizations have no API for the prepaid balance, so the
+# user types the Console figure in once; later usage on this PC is subtracted.
+$script:ClaudeCreditItem = New-Object System.Windows.Forms.ToolStripMenuItem 'Claude API 잔액 입력...'
+$script:ClaudeCreditItem.add_Click({
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    $prompt = "platform.claude.com 대시보드의 '조직 크레딧' 금액을 입력하세요.`n" +
+        "이후 사용분은 이 PC 로그로 계산해 뺍니다. 입력을 지우려면 clear"
+    $raw = [Microsoft.VisualBasic.Interaction]::InputBox($prompt, 'Claude API 잔액', '')
+    $raw = ("$raw" -replace '\s', '')
+    if (-not $raw) { return }
+    [void](Start-Worker -Arguments @('--set-claude-credit', $raw) -Kind 'config' -OnDone { Request-Refresh })
+})
+[void]$menu.Items.Add($script:ClaudeCreditItem)
+
 $script:AotItem = New-Object System.Windows.Forms.ToolStripMenuItem 'Always on Top'
 $script:AotItem.CheckOnClick = $true
 $script:AotItem.Checked = (Get-AlwaysOnTop)
