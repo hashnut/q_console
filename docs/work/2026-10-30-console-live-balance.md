@@ -29,3 +29,25 @@
 - Console 응답을 로그인된 브라우저와 실제 앱 프로필에서 직접 확인했다.
 - [CodexBar의 Console 제공자 문서](https://github.com/steipete/CodexBar/blob/main/docs/claudeplatform.md): 공개 추론 키·구독 OAuth와 Console 세션의 구분, 읽기 전용 endpoint와 minor-unit 형식의 교차 근거.
 - 비공개 웹 응답이 바뀌거나 로그인 세션이 만료되면 조회 불가 상태를 표시한다. 해당 PC에서 재연결/앱 수정이 필요할 수 있다.
+
+## 로컬 재빌드·재실행 (2026-10-30 16:23 Asia/Seoul)
+
+- 사용자 요청으로 `git pull --ff-only`: `37bf14b` → `758ee6c`. 시작 작업 트리 깨끗함.
+- Console C# 호스트와 PyInstaller EXE 재빌드 성공. 루트/dist EXE SHA256 `c679bfb0a3758a502b712e49047e07ed62455660030fdeea3b1daadc86e3f12b` 일치.
+- Console 기능 단위 테스트 13개 PASS. 새 루트 EXE로 트레이 재시작 확인(PID 4456).
+- 현재 PC의 연결 metadata가 없어 실제 조회는 `source=console,status=unavailable,remaining=null`, 로그인 필요로 표시된다. 실제 잔액 정상 조회로 판정하지 않았다.
+- `--connect-claude-console`로 전용 연결 창 실행. 사용자 로그인 후 잔액/실측 시각 확인이 남아 있다. 커밋·푸시하지 않음.
+- 로그인 후 PASS: 연결 조직 `dda1bd59-d5b1-4461-a7ed-824f4d29cb77` 일치. 로그인 직후 웹 실측 $93.83, 새 EXE `--refresh` exit 0 후 16:25:33 KST 실측 $93.50, `source=console,status=ok,error=''` 확인. 대시보드·오버레이 HTML 모두 $93.50 반영. 실제 웹 재조회와 정상 화면 데이터 갱신을 확인해 로그인 대기 항목 해소. 커밋·푸시하지 않음.
+
+## 재시작·자동 갱신 검증 (2026-10-30 Asia/Seoul)
+
+- 사용자 요청으로 새 EXE를 다시 실행. 트레이 PID 4456 → 68468, 새 프로세스 시작 16:29:06 확인.
+- 재시작 전 실측: 16:28:40 $90.78. 시작 직후에는 정상 요청 간격 제한으로 기존 실측 캐시를 유지했다.
+- 수동 refresh나 재로그인 없이 첫 자동 주기에서 16:30:10 $88.57로 실측 갱신. `source=console,status=ok,error=''`, 동일 조직 ID 확인.
+- 대시보드·오버레이 HTML에도 $88.57 반영. 로그인 유지와 재시작 후 자동 실제 잔액 조회 모두 PASS. 커밋·푸시하지 않음.
+
+## 재빌드 산출물 게시 준비 (2026-10-30 Asia/Seoul)
+
+- 사용자 요청으로 재빌드한 루트 EXE, Console 조회 호스트 EXE, 검증 기록을 함께 커밋·푸시한다.
+- 배포 ZIP도 같은 루트 EXE로 갱신. EXE/dist/ZIP 내부 EXE 바이트 일치, ZIP 단일 파일 목록·CRC 검사 PASS.
+- 게시 전 `git fetch origin` 기준 로컬 HEAD와 origin/main의 차이는 0/0. 로그인 프로필·설정·사용량 캐시는 게시 대상에 포함하지 않는다.
