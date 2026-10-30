@@ -56,6 +56,7 @@ DEFAULTS = {
     "anthropic_admin_key": "",
     "claude_api_budget_usd": 200.0,
     "claude_api_credit_usd": 200.0,
+    "claude_api_base_spent_usd": 0.0,
     "claude_credit_expiry": "2026-11-04",
     "claude_credit_start_date": "",
     "codex_api_budget_tokens": 50_000_000,

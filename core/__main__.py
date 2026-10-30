@@ -336,8 +336,8 @@ def main(argv) -> int:
         index = args.index("--set-overlay-items")
         raw = args[index + 1] if index + 1 < len(args) else ""
         items = [item.strip() for item in raw.split(",") if item.strip()]
-        if not items or any(item not in config.DEFAULTS["overlay_items"] for item in items):
-            emit("Choose at least one overlay item: claude-code,fable,codex,clock")
+        if not items or any(item not in config.ALL_OVERLAY_ITEMS for item in items):
+            emit("Choose at least one overlay item: %s" % ",".join(config.ALL_OVERLAY_ITEMS))
             return 2
         cfg = config.update(overlay_items=config.overlay_items({"overlay_items": items}))
         snap = load_cached_snapshot()

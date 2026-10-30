@@ -36,27 +36,35 @@ from .util import parse_iso
 # Public list price, USD per million tokens (input, output).
 # Cache reads bill at 0.1x input; 5-minute cache writes 1.25x; 1-hour writes 2x.
 PRICING = {
+    "claude-fable-5-5": (10.0, 50.0),
     "claude-fable-5": (10.0, 50.0),
     "claude-mythos-5": (10.0, 50.0),
+    "claude-opus-5-5": (5.0, 25.0),
     "claude-opus-5": (5.0, 25.0),
     "claude-opus-4-8": (5.0, 25.0),
     "claude-opus-4-7": (5.0, 25.0),
     "claude-opus-4-6": (5.0, 25.0),
+    "claude-sonnet-5-5": (3.0, 15.0),
     "claude-sonnet-5": (3.0, 15.0),
     "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-haiku-5-5": (1.0, 5.0),
     "claude-haiku-4-5": (1.0, 5.0),
 }
 FALLBACK_PRICE = (5.0, 25.0)  # unknown model -> price it like an Opus tier
 
 PRETTY = {
+    "claude-fable-5-5": "Fable 5.5",
     "claude-fable-5": "Fable 5",
     "claude-mythos-5": "Mythos 5",
+    "claude-opus-5-5": "Opus 5.5",
     "claude-opus-5": "Opus 5",
     "claude-opus-4-8": "Opus 4.8",
     "claude-opus-4-7": "Opus 4.7",
     "claude-opus-4-6": "Opus 4.6",
+    "claude-sonnet-5-5": "Sonnet 5.5",
     "claude-sonnet-5": "Sonnet 5",
     "claude-sonnet-4-6": "Sonnet 4.6",
+    "claude-haiku-5-5": "Haiku 5.5",
     "claude-haiku-4-5": "Haiku 4.5",
 }
 
@@ -66,8 +74,21 @@ def is_fable(model: str) -> bool:
     return (model or "").startswith("claude-fable-")
 
 
+def _rates_for(model: str) -> tuple[float, float]:
+    if model in PRICING:
+        return PRICING[model]
+    low = (model or "").lower()
+    if "fable" in low or "mythos" in low:
+        return (10.0, 50.0)
+    if "sonnet" in low:
+        return (3.0, 15.0)
+    if "haiku" in low:
+        return (1.0, 5.0)
+    return FALLBACK_PRICE
+
+
 def price_of(model: str, inp, out, cache_read, cw5, cw1) -> float:
-    p_in, p_out = PRICING.get(model, FALLBACK_PRICE)
+    p_in, p_out = _rates_for(model)
     return (
         inp * p_in
         + out * p_out

@@ -452,6 +452,9 @@ def account_credit_text(credits) -> str:
 def claude_api_credit_text(credits) -> str:
     credits = credits or {}
     rem = credits.get("remaining")
+    spent = float(credits.get("spent") or 0.0)
     if rem is not None:
+        if spent > 0:
+            return "API 크레딧 ${:,.2f} 남음 (${:,.2f} 사용)".format(rem, spent)
         return "API 크레딧 ${:,.2f} 남음".format(rem)
     return ""

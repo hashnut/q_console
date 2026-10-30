@@ -585,7 +585,7 @@ function Update-Display {
             elseif ($t -like 'Claude*') { $tag = 'C' }
             $val = ''
             if ($t -match '(\d+(?:\.\d+)?%)') { $val = $Matches[1] }
-            elseif ($t -match '(\$\d+)') { $val = $Matches[1] }
+            elseif ($t -match '(\$\d+(?:\.\d+)?)') { $val = $Matches[1] }
             elseif ($t -match 'unavailable') { $val = 'N/A' }
             elseif ($t -match 'ERROR') { $val = 'ERR' }
             else { $val = '--' }

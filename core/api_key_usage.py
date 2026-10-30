@@ -34,7 +34,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import claude_code, codex, config
+from . import claude_code, codex, config, store
 
 COST_REPORT_URL = "https://api.anthropic.com/v1/organizations/cost_report"
 TIMEOUT_SEC = 8
@@ -225,6 +225,138 @@ def admin_cost_usd(admin_key: str, start: int, end: int) -> float:
     return total_cents / 100.0
 
 
+# ── OpenCodex Anthropic API-key scanner ─────────────────────────────────────
+
+def _opencodex_anthropic_api_providers() -> set[str]:
+    """Provider IDs in ~/.opencodex/config.json that use an Anthropic API key."""
+    providers = {"anthropic-apikey"}
+    try:
+        cfg_path = os.path.expanduser("~/.opencodex/config.json")
+        if os.path.exists(cfg_path):
+            with open(cfg_path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            for name, prov in ((data or {}).get("providers") or {}).items():
+                if not isinstance(prov, dict):
+                    continue
+                if prov.get("adapter") == "anthropic" and (
+                    prov.get("authMode") == "key" or str(prov.get("apiKey") or "").strip()
+                ):
+                    providers.add(str(name))
+    except Exception:
+        pass
+    return providers
+
+
+def _parse_opencodex_chunk(handle, offset: int, api_providers: set[str]) -> tuple[int, list]:
+    """Parse OpenCodex usage.jsonl from byte offset and return (new_offset, rows).
+
+    Each row is [ts_sec, model, uncached_in, out, cache_read, cw5, cw1].
+    Note that OpenCodex's `inputTokens` is inclusive of cache read and cache
+    creation tokens, unlike Claude Code's raw transcript where `input_tokens`
+    is uncached only.
+    """
+    rows = []
+    handle.seek(offset)
+    while True:
+        pos = handle.tell()
+        line = handle.readline()
+        if not line:
+            break
+        if not line.endswith(b"\n") and not line.endswith(b"\r"):
+            # Incomplete trailing line being written concurrently; rewind.
+            handle.seek(pos)
+            break
+        if b"anthropic" not in line:
+            continue
+        try:
+            row = json.loads(line.decode("utf-8", errors="ignore"))
+        except ValueError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        prov = str(row.get("provider") or "")
+        acct = str(row.get("accountLogLabel") or "")
+        # Never match OAuth subscription traffic (`provider == "anthropic"` without API key label).
+        if prov not in api_providers and not (prov.startswith("anthropic") and acct.startswith("k")):
+            continue
+        ts_ms = row.get("timestamp") or 0
+        if not ts_ms:
+            continue
+        u = row.get("usage") or {}
+        if not isinstance(u, dict):
+            continue
+        inp_total = int(u.get("inputTokens") or 0)
+        out = int(u.get("outputTokens") or 0)
+        cread = int(u.get("cacheReadInputTokens") or 0)
+        cwrite = int(u.get("cacheCreationInputTokens") or 0)
+        cw1 = min(cwrite, int(u.get("cacheCreation1hInputTokens") or 0))
+        cw5 = max(0, cwrite - cw1)
+        uncached_inp = max(0, inp_total - cread - cwrite)
+        model = str(row.get("model") or row.get("requestedModel") or "claude-sonnet-5-5")
+        if "/" in model:
+            model = model.split("/", 1)[-1]
+        rows.append([int(ts_ms / 1000), model, uncached_inp, out, cread, cw5, cw1])
+    return handle.tell(), rows
+
+
+def _opencodex_anthropic_api_records() -> list:
+    """Incrementally scan ~/.opencodex/usage.jsonl without losing older rows."""
+    ocx_usage_path = os.path.expanduser("~/.opencodex/usage.jsonl")
+    if not os.path.exists(ocx_usage_path):
+        return []
+    try:
+        size = int(os.path.getsize(ocx_usage_path))
+    except OSError:
+        return []
+
+    api_providers = _opencodex_anthropic_api_providers()
+    scanner = store.Scanner("opencodex")
+    cached = scanner._mine.get(ocx_usage_path)
+    prev_offset = 0
+    records = []
+    if isinstance(cached, dict):
+        data = cached.get("data")
+        if isinstance(data, dict):
+            prev_offset = int(data.get("offset") or 0)
+            prev_rows = data.get("rows")
+            if isinstance(prev_rows, list) and 0 <= prev_offset <= size:
+                records = list(prev_rows)
+            else:
+                prev_offset = 0
+
+    if prev_offset == size and cached is not None:
+        scanner.keep(ocx_usage_path)
+        scanner.commit()
+        return records
+
+    try:
+        with open(ocx_usage_path, "rb") as handle:
+            new_offset, new_rows = _parse_opencodex_chunk(handle, prev_offset, api_providers)
+    except OSError:
+        return records
+
+    records.extend(new_rows)
+    scanner.put(ocx_usage_path, [size], {"offset": new_offset, "rows": records})
+    scanner.commit()
+    return records
+
+
+def _opencodex_anthropic_api_spend(start: int, end: int | None = None) -> tuple[float, float]:
+    """Return (total_usd, fable_usd) from OpenCodex Anthropic API-key rows since `start`."""
+    total = fable = 0.0
+    for row in _opencodex_anthropic_api_records():
+        if not isinstance(row, list) or len(row) < 7:
+            continue
+        ts, model, uncached_inp, out, cread, cw5, cw1 = row[:7]
+        if ts < start or (end is not None and ts >= end):
+            continue
+        cost = claude_code.price_of(model, uncached_inp, out, cread, cw5, cw1)
+        total += cost
+        if claude_code.is_fable(model):
+            fable += cost
+    return total, fable
+
+
 # ── collectors ──────────────────────────────────────────────────────────────
 
 def collect_claude_api(cfg: dict, now: int, mode: dict) -> dict:
@@ -257,20 +389,24 @@ def collect_claude_api(cfg: dict, now: int, mode: dict) -> dict:
         note = None
 
     local = claude_code.collect(cfg)
-    if local.get("status") != "ok":
+    total = fable = 0.0
+    if local.get("status") == "ok":
+        for record in local["records"]:
+            if record["ts"] < start:
+                continue
+            total += record["cost"]
+            if claude_code.is_fable(record["model"]):
+                fable += record["cost"]
+    ocx_total, ocx_fable = _opencodex_anthropic_api_spend(start, end)
+    total += ocx_total + float(cfg.get("claude_api_base_spent_usd") or 0.0)
+    fable += ocx_fable
+    if local.get("status") != "ok" and total <= 0:
         return {
             "status": "unavailable", "mode": "api_key",
             "note": note or ("API 키 모드 · %s" % local.get("note")),
             "all_models": {"used": None, "resets_at": None},
             "fable": {"used": None, "resets_at": None},
         }
-    total = fable = 0.0
-    for record in local["records"]:
-        if record["ts"] < start:
-            continue
-        total += record["cost"]
-        if claude_code.is_fable(record["model"]):
-            fable += record["cost"]
     return _claude_api_result(
         total, fable, budget, end,
         note or "API 키 모드 · 이 PC의 Claude Code 세션 로그 환산", False)
@@ -331,6 +467,7 @@ def collect_codex_api(cfg: dict, now: int) -> dict:
 def claude_api_credit_status(cfg: dict, now: int) -> dict:
     """Track Anthropic API credit balance and usage."""
     total = float(cfg.get("claude_api_credit_usd") or cfg.get("claude_api_budget_usd") or 200.0)
+    base_spent = float(cfg.get("claude_api_base_spent_usd") or 0.0)
     expiry = str(cfg.get("claude_credit_expiry") or "2026-11-04").strip()
     mode = claude_auth_mode(cfg)
     start, end = month_window(now)
@@ -344,47 +481,36 @@ def claude_api_credit_status(cfg: dict, now: int) -> dict:
         except Exception:
             pass
 
+    admin_key = mode.get("admin_key") or ""
+    if admin_key:
+        try:
+            spent = admin_cost_usd(admin_key, start, end)
+            remaining = max(0.0, total - spent)
+            return {
+                "total": total,
+                "spent": spent,
+                "remaining": remaining,
+                "expiry": expiry,
+                "currency": "USD",
+                "has_credits": total > 0,
+            }
+        except Exception:
+            pass
+
     # If the user is signed into subscription (Max/Pro), the local claude projects
     # log represents subscription usage, not API key spend. In pure API key mode,
-    # the local log or Admin API reports actual token spend.
-    spent = 0.0
+    # the local log reports actual token spend.
+    spent = base_spent
     if mode.get("mode") == "api_key":
-        admin_key = mode.get("admin_key") or ""
-        if admin_key:
-            try:
-                spent = admin_cost_usd(admin_key, start, end)
-            except Exception:
-                spent = 0.0
-        else:
-            local = claude_code.collect(cfg)
-            if local.get("status") == "ok":
-                for record in local.get("records") or []:
-                    if record.get("ts", 0) >= start:
-                        spent += record.get("cost", 0.0)
+        local = claude_code.collect(cfg)
+        if local.get("status") == "ok":
+            for record in local.get("records") or []:
+                if record.get("ts", 0) >= start:
+                    spent += record.get("cost", 0.0)
 
-    # Check OpenCodex usage for Anthropic API usage if applicable
-    try:
-        ocx_usage_path = os.path.expanduser("~/.opencodex/usage.jsonl")
-        if os.path.exists(ocx_usage_path):
-            with open(ocx_usage_path, encoding="utf-8", errors="ignore") as f:
-                # Seek recent records
-                f.seek(max(0, os.path.getsize(ocx_usage_path) - 100000))
-                for line in f:
-                    try:
-                        row = json.loads(line)
-                        if (row.get("provider") == "anthropic-apikey" or
-                            "anthropic" in str(row.get("requestedModel", ""))):
-                            if row.get("timestamp", 0) / 1000 >= start:
-                                # approximate cost if available
-                                u = row.get("usage") or {}
-                                inp = u.get("inputTokens") or 0
-                                out = u.get("outputTokens") or 0
-                                # Haiku / Sonnet rough estimate if needed
-                                spent += (inp * 0.000003 + out * 0.000015)
-                    except Exception:
-                        pass
-    except Exception:
-        pass
+    # Include OpenCodex Anthropic API-key usage (tracked incrementally across the full file).
+    ocx_spent, _ = _opencodex_anthropic_api_spend(start, end)
+    spent += ocx_spent
 
     remaining = max(0.0, total - spent)
     return {
