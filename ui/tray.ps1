@@ -54,7 +54,7 @@ $script:JobTimer.add_Tick({
     try {
         foreach ($job in @($script:Jobs)) {
             if (-not $job.proc.HasExited) {
-                if (([DateTime]::Now - $job.started).TotalSeconds -gt 180) {
+                if (([DateTime]::Now - $job.started).TotalSeconds -gt $job.timeout) {
                     try { $job.proc.Kill() } catch {}
                 }
                 continue
@@ -84,7 +84,8 @@ function Start-Worker {
     param(
         [string[]]$Arguments,
         [scriptblock]$OnDone,
-        [string]$Kind = 'generic'
+        [string]$Kind = 'generic',
+        [int]$TimeoutSeconds = 180
     )
     $argList = @()
     foreach ($a in ($WorkerArguments -split ' ')) { if ($a) { $argList += $a } }
@@ -99,7 +100,7 @@ function Start-Worker {
     }
     [void]$script:Jobs.Add(@{
         proc = $proc; onDone = $OnDone; started = [DateTime]::Now
-        stdout = $stdout; kind = $Kind
+        stdout = $stdout; kind = $Kind; timeout = $TimeoutSeconds
     })
     $script:JobTimer.Start()
     return $true
@@ -765,17 +766,11 @@ foreach ($entry in $itemsDef) {
 Update-OverlayItemChecks
 [void]$menu.Items.Add($overlayItemsRoot)
 
-# Individual Anthropic organizations have no API for the prepaid balance, so the
-# user types the Console figure in once; later usage on this PC is subtracted.
-$script:ClaudeCreditItem = New-Object System.Windows.Forms.ToolStripMenuItem 'Claude API 잔액 입력...'
+# Console login reads the organization-wide balance, including every PC.
+$script:ClaudeCreditItem = New-Object System.Windows.Forms.ToolStripMenuItem 'Claude Console 연결...'
 $script:ClaudeCreditItem.add_Click({
-    Add-Type -AssemblyName Microsoft.VisualBasic
-    $prompt = "platform.claude.com 대시보드의 '조직 크레딧' 금액을 입력하세요.`n" +
-        "이후 사용분은 이 PC 로그로 계산해 뺍니다. 입력을 지우려면 clear"
-    $raw = [Microsoft.VisualBasic.Interaction]::InputBox($prompt, 'Claude API 잔액', '')
-    $raw = ("$raw" -replace '\s', '')
-    if (-not $raw) { return }
-    [void](Start-Worker -Arguments @('--set-claude-credit', $raw) -Kind 'config' -OnDone { Request-Refresh })
+    if (@($script:Jobs | Where-Object { $_.kind -eq 'console-connect' }).Count -gt 0) { return }
+    [void](Start-Worker -Arguments @('--connect-claude-console') -Kind 'console-connect' -TimeoutSeconds 930 -OnDone { Request-Refresh })
 })
 [void]$menu.Items.Add($script:ClaudeCreditItem)
 

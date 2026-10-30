@@ -66,6 +66,11 @@ def claude_api_credits_html(provider, tag="div", cls="account-info") -> str:
     credits = provider.get("api_credits") or {}
     rem = credits.get("remaining")
     spent = credits.get("spent")
+    if credits.get("source") == "console":
+        text = ("$%.2f%s" % (rem, "*" if credits.get("status") == "stale" else "")) if rem is not None else "--"
+        label = " 남음" if rem is not None else " · Console 연결 필요"
+        return "<%s class='%s' title='%s'>API 크레딧 <b>%s</b>%s</%s>" % (
+            tag, cls, esc(claude_api_credit_tip(credits)), text, label, tag)
     if rem is None:
         return ""
     spent_val = float(spent or 0.0)
@@ -743,6 +748,8 @@ def render_overlay(snap: dict, cfg: dict | None = None) -> str:
         api_cred = claude_prov.get("api_credits") or {}
         rem = api_cred.get("remaining")
         val_text = ("$%.2f" % rem) if rem is not None else "--"
+        if api_cred.get("status") == "stale" and rem is not None:
+            val_text += "*"
         tip = claude_api_credit_tip(api_cred) or "Anthropic API 크레딧: --"
         html = ("<span class='k' title='%s'>API</span>"
                 "<span class='v' style='color:#e08257' title='%s'>%s</span>"

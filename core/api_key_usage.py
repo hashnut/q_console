@@ -509,6 +509,13 @@ def _local_api_spend(cfg: dict, mode: dict, since: int) -> float:
 
 
 def claude_api_credit_status(cfg: dict, now: int) -> dict:
+    if cfg.get("claude_api_credit_source", "console") != "local":
+        from . import console_credit
+        return console_credit.collect(cfg, now)
+    return _local_credit_status(cfg, now)
+
+
+def _local_credit_status(cfg: dict, now: int) -> dict:
     """Anthropic API prepaid credit balance.
 
     Best source first: an Admin key's billed cost, then the Console balance the

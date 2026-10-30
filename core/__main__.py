@@ -14,6 +14,7 @@ Worker CLI (this is the contract tray.ps1 expects):
                               Claude API balance read off the Console (and when);
                               later usage on this PC is subtracted from it.
                               "clear" forgets the entered balance.
+    --connect-claude-console  sign in once for organization-wide live balance
     --set-theme <id>          persist theme, re-render (surfacer|phosphor|mini)
     --set-always-on-top on|off
     --set-overlay-items codex,clock   visible overlay items (comma-separated)
@@ -366,11 +367,21 @@ def main(argv) -> int:
         emit("usage_mode=%s" % config.update(usage_mode=name)["usage_mode"])
         return 0
 
+    if "--connect-claude-console" in args:
+        from core import console_credit
+        ok = console_credit.connect(config.load(), int(time.time()))
+        if ok:
+            config.update(claude_api_credit_source="console")
+            refresh()
+        emit("Claude Console 연결 완료" if ok else "Claude Console 연결을 완료하지 못했습니다")
+        return 0 if ok else 2
+
     if "--set-claude-credit" in args:
         index = args.index("--set-claude-credit")
         raw = (args[index + 1] if index + 1 < len(args) else "").strip()
         if raw.lower() == "clear":
-            config.update(claude_credit_anchor_usd=None, claude_credit_anchor_at=0)
+            config.update(claude_credit_anchor_usd=None, claude_credit_anchor_at=0,
+                          claude_api_credit_source="console")
             emit("claude_credit_anchor cleared")
             return 0
         try:
@@ -389,7 +400,8 @@ def main(argv) -> int:
             except ValueError:
                 emit("시각 형식은 YYYY-MM-DDTHH:MM 입니다")
                 return 2
-        config.update(claude_credit_anchor_usd=balance, claude_credit_anchor_at=at)
+        config.update(claude_credit_anchor_usd=balance, claude_credit_anchor_at=at,
+                      claude_api_credit_source="local")
         emit("claude_credit_anchor=%.2f at %s" % (
             balance, datetime.datetime.fromtimestamp(at).strftime("%Y-%m-%d %H:%M:%S")))
         return 0

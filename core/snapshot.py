@@ -322,7 +322,7 @@ def build(cfg: dict, previous=None) -> dict:
                 provider["reset_credits"] = raw["reset_credits"]
             api_credits = api_key_usage.claude_api_credit_status(cfg, now)
             provider["api_credits"] = api_credits
-            if raw.get("mode") == "api_key" and api_credits.get("has_credits"):
+            if api_credits.get("has_credits"):
                 provider["api_credit_text"] = claude_api_credit_text(api_credits)
         if provider.get("reset_credits") is not None:
             provider["reset_credit_tip"] = reset_credit_tooltip(provider["reset_credits"], now)
@@ -452,6 +452,10 @@ def account_credit_text(credits) -> str:
 def claude_api_credit_text(credits) -> str:
     credits = credits or {}
     rem = credits.get("remaining")
+    if credits.get("source") == "console":
+        if rem is None:
+            return "API 크레딧 -- · " + (credits.get("error") or "Console 연결 필요")
+        return "API 크레딧 ${:,.2f}{} 남음".format(rem, "*" if credits.get("status") == "stale" else "")
     spent = float(credits.get("spent") or 0.0)
     if rem is not None:
         if spent > 0:
@@ -464,6 +468,15 @@ def claude_api_credit_tip(credits) -> str:
     """Where the API balance came from, so an estimate never reads as billed."""
     credits = credits or {}
     rem = credits.get("remaining")
+    if credits.get("source") == "console":
+        if rem is None:
+            return credits.get("error") or "Claude Console 연결 필요"
+        stamp = _stamp_text(credits.get("measured_at"))
+        name = credits.get("organization_name") or "선택한 API 조직"
+        tip = "Claude Console 조직 크레딧: ${:,.2f}\n{} · {} 웹 실측 · 모든 PC 사용분 포함".format(rem, name, stamp)
+        if credits.get("status") == "stale":
+            tip += "\n마지막 실측값 유지 · " + (credits.get("error") or "조회 실패")
+        return tip
     if rem is None:
         return ""
     head = "Anthropic API 크레딧: 잔액 ${:,.2f} / 총 ${:,.2f} (만료 {})".format(

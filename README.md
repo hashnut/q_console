@@ -33,6 +33,7 @@ Enterprise에서 한도를 제공하지 않으면 금액만 표시하며, 별도
 
 ```
 q_console.exe --open                 트레이 + 대시보드 창 바로 열기
+q_console.exe --connect-claude-console  Claude Console 로그인 및 조직 크레딧 연결
 q_console.exe --install-autostart    Windows 시작 시 자동 실행
 q_console.exe --uninstall-autostart
 q_console.exe --install-startmenu
@@ -172,6 +173,29 @@ ui/                     트레이(PowerShell) + WebView2 호스트
 ```
 
 설정과 캐시는 `%LOCALAPPDATA%\q_console`에만 기록합니다.
+
+## Claude API 조직 크레딧
+
+트레이의 **Claude Console 연결...**을 눌러 Claude Platform에 한 번 로그인합니다.
+구독 로그인과 별도로 API 조직을 확인하며, API 조직이 여러 개면 표시할 조직을 고릅니다.
+이후 앱은 약 1분마다 Console 웹페이지와 같은 읽기 전용 잔액 응답을 조회합니다.
+다른 PC·다른 API 키의 사용, 충전, 크레딧 만료도 서버 잔액에 함께 반영됩니다.
+웹페이지와 앱의 조회 시각 사이에 사용이 발생하면 다음 갱신까지 차이가 날 수 있습니다.
+
+로그인은 이 PC의 앱 전용 WebView2 프로필(`claude-console-profile`)에 유지됩니다.
+Chrome의 쿠키를 가져오지 않으며, 세션 쿠키를 설정·사용량 캐시·로그·배포 파일에 복사하지 않습니다.
+각 PC에서는 최초 한 번씩 연결해야 합니다. 세션이 만료되면 다시 연결합니다.
+조회 실패 시 `*`와 마지막 실측 시각·실패 이유를 표시하고, 24시간이 지난 값은 `--`로 바꿉니다.
+실패했다고 로컬 로그 추정 잔액으로 대체하지 않습니다. 표시한 만료일도 서버 응답을 사용합니다.
+
+Console의 비공개 읽기 전용 `/api/organizations` 및 `/prepaid/credits` 응답을 사용하므로
+사이트 변경 시 재연결 또는 앱 업데이트가 필요할 수 있습니다.
+기존 `--set-claude-credit` 명령은 로컬 추정 모드를 명시적으로 선택하는 고급 옵션으로 남아 있습니다.
+여러 PC 사용량을 자동 반영하려면 **Claude Console 연결...**을 사용합니다.
+`--set-claude-credit clear`는 수동 기준점을 지우고 웹 조회 모드로 돌아갑니다.
+
+소스에서 EXE를 빌드할 때는 먼저 `powershell -File tools/build_console_host.ps1`로
+WebView2 로그인 호스트를 빌드한 뒤 `pyinstaller q_console.spec`를 실행합니다.
 
 ## License
 

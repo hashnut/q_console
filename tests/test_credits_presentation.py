@@ -96,7 +96,7 @@ class ClaudeApiCreditTests(unittest.TestCase):
 
     @patch("core.api_key_usage.os.path.exists", return_value=False)
     def test_claude_card_shows_api_credits(self, exists_mock):
-        cfg = dict(config.DEFAULTS, claude_api_credit_usd=200.0, claude_credit_expiry="2026-11-04")
+        cfg = dict(config.DEFAULTS, claude_api_credit_source="local", claude_api_credit_usd=200.0, claude_credit_expiry="2026-11-04")
         with patch("core.snapshot._read_current", return_value=(self.claude, self.codex)), \
              patch("core.snapshot.now_ms", return_value=self.now * 1000):
             snap = snapshot.build(cfg)
@@ -142,6 +142,7 @@ class ClaudeApiCreditTests(unittest.TestCase):
 
             cfg = dict(
                 config.DEFAULTS,
+                claude_api_credit_source="local",
                 claude_api_credit_usd=200.0,
                 claude_api_base_spent_usd=3.0,
                 claude_credit_expiry="2026-11-04",
@@ -185,7 +186,7 @@ class ClaudeApiCreditTests(unittest.TestCase):
             straddle = row % ((anchor_at - 10) * 1000, 20_000)
             after = row % ((anchor_at + 60) * 1000, 5_000)
             ocx_usage.write_text(before + straddle + after, encoding="utf-8")
-            cfg = dict(config.DEFAULTS, claude_api_credit_usd=200.0,
+            cfg = dict(config.DEFAULTS, claude_api_credit_source="local", claude_api_credit_usd=200.0,
                        claude_credit_anchor_usd=136.04, claude_credit_anchor_at=anchor_at)
             with patch.object(config, "SCAN_PATH", str(Path(tmpdir) / "scan.json")), \
                  patch("core.api_key_usage.os.path.expanduser",
