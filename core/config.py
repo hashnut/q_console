@@ -35,6 +35,9 @@ DEFAULTS = {
     # Credentials stay in the clients' own files, never in the usage cache.
     # Expired Claude OAuth credentials are refreshed and atomically renewed.
     "claude_credentials_file": "~/.claude/.credentials.json",
+    "claude_usage_source": "claude-code",
+    "opencodex_home": "~/.opencodex",
+    "opencodex_cli_file": "",
     "codex_auth_file": "~/.codex/auth.json",
     "gemini_cli_path": "~/.gemini/bin/agy.exe",
     "claude_settings_file": "~/.claude/settings.json",

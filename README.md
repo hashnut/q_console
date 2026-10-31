@@ -81,6 +81,22 @@ q_console.bat --print    텍스트 사용률 출력
 사용량 조회의 요청 제한 대기보다 먼저 갱신합니다. 사용량 서버가 만료 토큰에 HTTP 401 대신 429를 반환하는 경우도 처리합니다. 0%는 서버가 실제로 0을 반환했을
 때만 표시합니다.
 
+## OpenCodex 구독 사용량
+
+OpenCodex에서 Claude 구독을 사용한다면 해당 인증 소유자를 사용량 소스로 선택할 수 있습니다.
+
+```
+q_console.exe --set-claude-source opencodex
+q_console.exe --refresh
+q_console.exe --set-claude-source claude-code  기존 Claude Code 로그인으로 복귀
+```
+
+- 기본 소스는 기존 `claude-code`입니다. 선택한 소스는 이 PC에 저장됩니다. `opencodex`는 설치·실행 중인 공식 OpenCodex CLI와 활성 Anthropic 구독 계정이 필요합니다.
+- 공식 `provider quota --json`에서 활성 구독의 주간·5시간·Fable 사용률과 실제 측정/재설정 시각을 읽습니다. OpenCodex가 자신의 토큰 갱신과 quota 캐시를 관리하며, q_console은 이 경로에서 구독 토큰을 갱신하거나 Claude Code 인증 파일에 복사하지 않습니다.
+- 조회 중 계정/로그인이 바뀌거나 응답이 2분 이상 오래됐으면 `--`로 표시합니다. 다른 소스·이전 계정의 값을 유지하지 않습니다. 실패했다고 만료된 네이티브 토큰으로 자동 재시도하지 않습니다.
+- 이 정규화된 quota 응답은 리셋권 수량을 제공하지 않으므로 OpenCodex 소스에서는 Claude 리셋권 줄을 숨깁니다. Codex 리셋권과 Claude API 조직 잔액은 각각 기존 경로로 계속 읽습니다.
+- 일반 설치 경로는 자동 탐색합니다. 별도 설치는 설정의 `opencodex_home`과 `opencodex_cli_file`(공식 `bin/ocx.mjs` 절대 경로)을 지정할 수 있습니다. 강제 `api_key` 모드에서는 기존 API 예산 집계를 사용합니다.
+
 ## API 키 모드
 
 구독 로그인이 없고 **API 키**(`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` 환경변수 또는
@@ -164,6 +180,7 @@ pyinstaller q_console.spec
 q_console.bat           소스 실행 런처
 q_console.spec          EXE 빌드 정의 (PyInstaller)
 core/plan_usage.py      Claude/Fable/Codex 현재 계정 Usage 조회 (구독)
+core/opencodex_usage.py OpenCodex 소유자가 갱신하는 Claude 구독 Usage 조회
 core/api_key_usage.py   API 키 모드: 이번 달 사용량 vs 예산
 core/claude_code.py     ~/.claude/projects 세션 로그 파서 (단가 환산)
 core/codex.py           ~/.codex/sessions 롤아웃 파서 (토큰)

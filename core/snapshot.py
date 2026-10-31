@@ -26,7 +26,7 @@ from __future__ import annotations
 import concurrent.futures
 import datetime as _dt
 
-from . import api_key_usage, gemini, plan_usage
+from . import api_key_usage, gemini, opencodex_usage, plan_usage
 from .util import clamp_pct, fmt_dur, fmt_tokens, fmt_usd, now_ms, tone_for
 
 
@@ -218,6 +218,8 @@ def _read_claude(cfg: dict, now: int, retry=None) -> dict:
     A live subscription always wins - its number is a real plan limit, and the
     budget gauge must never quietly stand in for one.
     """
+    if cfg.get("claude_usage_source") == "opencodex" and cfg.get("usage_mode") != "api_key":
+        return opencodex_usage.collect(cfg, now)
     mode = api_key_usage.claude_auth_mode(cfg)
     if mode["mode"] == "api_key":
         return api_key_usage.collect_claude_api(cfg, now, mode)
@@ -283,7 +285,8 @@ def build(cfg: dict, previous=None) -> dict:
     claude, codex, gemini_raw = _read_current(cfg, now, previous)
     prior = _prior_limits(previous)
     specs = [
-        ("claude-code", "Claude Enterprise" if claude.get("plan") == "enterprise" else "Claude Code",
+        ("claude-code", "Claude Enterprise" if claude.get("plan") == "enterprise" else
+         "Claude" if claude.get("source") == "opencodex" else "Claude Code",
          claude, claude.get("all_models") or {}, claude.get("plan")),
         ("fable", "Fable", claude, claude.get("fable") or {}, claude.get("plan")),
         ("codex", "Codex", codex, codex.get("weekly") or {}, codex.get("plan")),
@@ -292,20 +295,27 @@ def build(cfg: dict, previous=None) -> dict:
     for provider_id, label, raw, value, plan in specs:
         limit = _limit(value.get("window_key") or "week",
                        value.get("window_label") or "주간 사용량",
-                       value, now, warn, measured_at=now)
+                       value, now, warn, measured_at=raw.get("measured_at") or now)
         previous_limit = prior.get(provider_id)
         if plan is not None and previous_limit and previous_limit.get("provider_plan") != plan:
             previous_limit = None
-        limit = _carry_forward(limit, previous_limit, now, warn,
-                               max_age, api_mode=raw.get("mode") == "api_key")
+        if raw.get("allow_carry") is not False:
+            limit = _carry_forward(limit, previous_limit, now, warn,
+                                   max_age, api_mode=raw.get("mode") == "api_key")
         provider = _provider(provider_id, label, raw, limit, plan)
+        if raw.get("source") == "opencodex":
+            provider["source"] = "opencodex"
+            provider["usage_scope"] = raw.get("usage_scope")
         if provider_id == "claude-code" and raw.get("usage_retry"):
             provider["usage_retry"] = raw["usage_retry"]
         if provider_id == "claude-code" and not limit.get("unit"):
             session_prior = prior.get("claude-code/session")
             if plan is not None and session_prior and session_prior.get("provider_plan") != plan:
                 session_prior = None
-            session = _session_limit(raw, session_prior, now, warn, max_age)
+            session = _session_limit(raw, session_prior if raw.get("allow_carry") is not False else None,
+                                     now, warn, max_age)
+            if session and raw.get("measured_at") and session.get("used") is not None:
+                session["measured_at"] = raw["measured_at"]
             if session:
                 provider["limits"].append(session)
         if provider_id == "codex":

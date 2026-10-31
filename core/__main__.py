@@ -9,6 +9,7 @@ gjc-backed exe still works exactly as before if you ever want it.
 Worker CLI (this is the contract tray.ps1 expects):
     --refresh                 rebuild the cache + detail.html, print the report
     --set-usage-mode M        auto | subscription | api_key (auto detects)
+    --set-claude-source S      claude-code | opencodex
     --set-budget claude=100   API-key mode budget: claude=<USD>, codex=<tokens>
     --set-claude-credit 137.92 [2026-10-30T14:47]
                               Claude API balance read off the Console (and when);
@@ -356,6 +357,16 @@ def main(argv) -> int:
         index = args.index("--set-overlay")
         flag = (args[index + 1] if index + 1 < len(args) else "off").lower()
         config.update(overlay_mode=flag in ("on", "1", "true", "yes"))
+        return 0
+
+    if "--set-claude-source" in args:
+        index = args.index("--set-claude-source")
+        source = args[index + 1] if index + 1 < len(args) else ""
+        if source not in ("claude-code", "opencodex"):
+            emit("사용법: --set-claude-source claude-code|opencodex")
+            return 2
+        config.update(claude_usage_source=source)
+        emit("Claude 사용량 소스: %s · 다음 Refresh에 적용" % source)
         return 0
 
     if "--set-usage-mode" in args:
